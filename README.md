@@ -5,12 +5,12 @@ A command-line tool that installs, updates, enables and removes ArcheAge Classic
 ## Install
 
 ```bash
-pipx install .
-# or, without pipx
-pip install --user .
+git clone https://github.com/Z-arium/AAC-ADDON_MANAGER
+cd AAC-ADDON_MANAGER
+./install.sh
 ```
 
-Needs Python 3.10+ and PyYAML.
+`install.sh` needs only Python 3. It puts aacam in its own virtualenv under `~/.local/share/aacam/venv` and links it to `~/.local/bin/aacam`; run it again after `git pull` to upgrade. If you prefer pipx: `pipx install .`
 
 ## Use
 
