@@ -1,0 +1,17 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "aacam"
+version = "0.1.0"
+description = "ArcheAge Classic addon manager for Linux (Wine, Proton, Lutris, Bottles)"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = ["PyYAML>=6"]
+
+[project.scripts]
+aacam = "aacam.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
