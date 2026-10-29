@@ -250,11 +250,14 @@ def cmd_fixes(args, settings):
             crash.set_fix(settings, key, False)
     except KeyError as e:
         raise CliError(f"unknown fix {e}; choose from {', '.join(crash.BY_KEY)}") from None
+    except PermissionError as e:
+        raise CliError(str(e)) from None
     if args.diagnostics:
         settings.set("diagnostics", args.diagnostics == "on")
     on = set(settings.get("fixes", []))
     for fix in crash.FIXES:
-        print(f"[{'on ' if fix.key in on else 'off'}] {fix.key}: {fix.title}")
+        state = "on " if fix.key in on and fix.cleared else "off"
+        print(f"[{state}] {fix.key}: {fix.title}{'' if fix.cleared else ' (waiting for the ArcheAge Classic team OK)'}")
         print(textwrap.indent(textwrap.fill(fix.why, 76), "      "))
     print(f"\nDiagnostics (extra Wine, Proton and DXVK logs): {'on' if settings.get('diagnostics') else 'off'}")
     print("Changes apply the next time you start the game.")

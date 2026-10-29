@@ -2,6 +2,8 @@
 
 A free app that gets ArcheAge Classic running on Linux and keeps your addons up to date. The official launcher still handles login and patching; this one handles the tweaks and hurdles around it. It checks your system for the drivers the game needs and tells you the exact command to fix what's missing on your distro, finds or downloads the official launcher, starts the game through it, and installs and updates addons. See the [roadmap](ROADMAP.md) for what's next.
 
+**Safe to use:** the launcher never changes game files, never touches the running game or anti-cheat, and never sees your login. It installs addons only through the game's own addon folder and `addons.txt`, and starts the official launcher, which does login and patching itself. See the ground rule in the [roadmap](ROADMAP.md).
+
 ## Desktop app
 
 Download `ArcheAge-Classic-Linux-Launcher-x86_64.AppImage` from the [Releases page](https://github.com/Z-arium/AAC-ADDON_MANAGER/releases), then:
@@ -19,7 +21,7 @@ The first time it opens, **Setup** walks you through three things:
 
 - **Play** updates your addons, then starts the official launcher, where you log in and press Play. While the game runs the app keeps an eye on its memory use. When it closes, the app checks the logs and the kernel for signs of a crash (out of memory, unhandled exceptions, GPU errors, a very short session). If it finds one, it explains it, saves the logs to a crash report zip, and suggests the fix that matches.
 - **Wine build**: the official launcher runs the game with Wine or Proton. Under Proton the game's anti-cheat closes it right after server select, so when the official launcher's Wine-Staging prefix exists, Play points it at a Wine-Staging build from Heroic or Lutris (`AAC_WINE`, `AAC_WINEPREFIX`). You can pick another build, including a WoW64 one, or let the official launcher choose.
-- **Crash fixes** are switches applied the next time the game starts: use less of the 32-bit game's 4 GB for graphics (DXVK settings), run it on the NVIDIA card on machines with two graphics chips, turn off esync/fsync, or draw with WineD3D instead of DXVK. **Diagnostics** records extra Wine, Proton and DXVK logs for one session, for bug reports. All of these are environment variables passed to the official launcher, which passes them to the game. No game files are touched and nothing reads or changes the game's memory, so there is nothing for anti-cheat to object to. Crash reports hide the login token the official launcher writes to its logs, and leave the game's crash dumps out because they can contain it.
+- **Crash fixes** are switches applied the next time the game starts, using only variables the official launcher itself knows: run the game on the NVIDIA card on machines with two graphics chips, turn off esync/fsync under Proton, or draw with WineD3D instead of DXVK. A DXVK setting that leaves the game more of its 4 GB is built but stays off until the ArcheAge Classic team confirms it is allowed (see the ground rule in [ROADMAP.md](ROADMAP.md)). Until then, lowering texture quality in the game's options is the fix for out-of-memory crashes. **Diagnostics** records extra Wine, Proton and DXVK logs for one session, for bug reports. All of these are environment variables passed to the official launcher, which passes them to the game. No game files are touched and nothing reads or changes the game's memory, so there is nothing for anti-cheat to object to. Crash reports hide the login token the official launcher writes to its logs, and leave the game's crash dumps out because they can contain it.
 - **My Addons**: everything in your addon folder, a checkbox to turn each one on or off in game, its version, and Update or Remove buttons.
 - **Get Addons**: the public catalogue, with search and tag filters. Install pulls in any addons it depends on.
 - **Update all** checks every addon you installed on startup and updates them in one click.
@@ -60,7 +62,7 @@ aacam doctor                  # check drivers and libraries, print the fix comma
 aacam launcher --download     # download the official launcher (or --set /path/to/it.AppImage)
 aacam launch --update-first   # update addons, then start the official launcher
 aacam report                  # system details and the launcher's log, to paste when asking for help
-aacam fixes                   # list crash fixes; --on dxvk_memory, --off wined3d, --diagnostics on
+aacam fixes                   # list crash fixes; --on nvidia_gpu, --off wined3d, --diagnostics on
 aacam wine                    # show or choose the Wine build (--set DIR, --auto, --launcher)
 aacam crash-report            # after a crash: collect logs and kernel messages into a zip and name known causes
 aacam crash-report --history  # recent sessions: how long they lasted, crash cause, zone

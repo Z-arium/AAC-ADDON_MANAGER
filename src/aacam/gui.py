@@ -299,8 +299,11 @@ class FixesDialog(QDialog):
         for fix in crash.FIXES:
             title = fix.title + ("  (suggested)" if fix.key in suggested and fix.key not in on else "")
             cb = QCheckBox(title)
-            cb.setChecked(fix.key in on or fix.key in suggested)
+            cb.setChecked(fix.cleared and (fix.key in on or fix.key in suggested))
             cb.setToolTip(fix.why)
+            if not fix.cleared:
+                cb.setEnabled(False)
+                cb.setText(f"{fix.title}  (waiting for the ArcheAge Classic team's OK)")
             form.addWidget(cb)
             why = QLabel(fix.why)
             why.setWordWrap(True)
@@ -326,7 +329,8 @@ class FixesDialog(QDialog):
 
     def save(self) -> None:
         for key, cb in self.boxes.items():
-            crash.set_fix(self.win.settings, key, cb.isChecked())
+            if cb.isEnabled():
+                crash.set_fix(self.win.settings, key, cb.isChecked())
         self.win.settings.set("diagnostics", self.diagnostics.isChecked())
         self.win.settings.set("wine", self.wine_combo.currentData())
         self.win.statusBar().showMessage("Saved. Fixes apply the next time you press Play.", 6000)

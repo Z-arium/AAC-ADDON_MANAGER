@@ -32,6 +32,9 @@ class Fix:
     title: str
     why: str
     env: dict[str, str]
+    # Per the ground rule in ROADMAP.md, a tweak the official launcher doesn't already use ships
+    # switched off until the ArcheAge Classic team confirms it is allowed.
+    cleared: bool = True
 
 
 FIXES: tuple[Fix, ...] = (
@@ -42,16 +45,16 @@ FIXES: tuple[Fix, ...] = (
         "around, and keeps less texture memory mapped in DXVK. Lowering texture quality in the game's options "
         "helps the most.",
         {"DXVK_CONFIG": "d3d9.maxAvailableMemory = 2048; d3d9.textureMemory = 32; "
-                        "dxvk.trackPipelineLifetime = True"}),
+                        "dxvk.trackPipelineLifetime = True"}, cleared=False),
     Fix("nvidia_gpu", "Run the game on the NVIDIA card",
         "On machines with Intel or AMD graphics plus an NVIDIA card, the game can start on the built-in chip "
-        "or switch between them, which crashes DXVK or makes it very slow.",
-        {"__NV_PRIME_RENDER_OFFLOAD": "1", "__VK_LAYER_NV_optimus": "NVIDIA_only",
-         "__GLX_VENDOR_LIBRARY_NAME": "nvidia"}),
+        "or switch between them, which crashes DXVK or makes it very slow. Uses the same DXVK setting the "
+        "official launcher uses for this.",
+        {"DXVK_FILTER_DEVICE_NAME": "NVIDIA"}),
     Fix("no_fsync", "Turn off esync and fsync",
         "Faster thread syncing in Wine and Proton. Rarely it causes freezes or crashes, and esync crashes "
         "when the open file limit is low.",
-        {"PROTON_NO_ESYNC": "1", "PROTON_NO_FSYNC": "1", "WINEESYNC": "0", "WINEFSYNC": "0"}),
+        {"PROTON_NO_ESYNC": "1", "PROTON_NO_FSYNC": "1"}),
     Fix("wined3d", "Draw with OpenGL (WineD3D) instead of Vulkan (DXVK)",
         "Slower, but avoids crashes in DXVK or the Vulkan driver. Use it if crashes mention Vulkan, "
         "\"device lost\" or a GPU error.",
@@ -87,7 +90,7 @@ def launch_env(settings: Settings, home: Path | None = None) -> dict[str, str | 
     if build is not None:
         env.update(wine.env(build, Path(settings.get("wineprefix") or wine.default_prefix(home))))
     for key in settings.get("fixes", []):
-        if key in BY_KEY:
+        if key in BY_KEY and BY_KEY[key].cleared:
             env.update(BY_KEY[key].env)
     if settings.get("diagnostics"):
         directory = log_dir()
@@ -101,6 +104,8 @@ def launch_env(settings: Settings, home: Path | None = None) -> dict[str, str | 
 def set_fix(settings: Settings, key: str, on: bool) -> None:
     if key not in BY_KEY:
         raise KeyError(key)
+    if on and not BY_KEY[key].cleared:
+        raise PermissionError(f"{key} waits for the ArcheAge Classic team's OK before it can be used")
     keys = [k for k in settings.get("fixes", []) if k != key and k in BY_KEY]
     if on:
         keys.append(key)
@@ -291,8 +296,8 @@ SIGNS: tuple[tuple[str, re.Pattern, str, str, str | None], ...] = (
                                  re.IGNORECASE),
      "The game ran out of its 4 GB of memory",
      "ArcheAge Classic is 32-bit, so it can use at most 4 GB however much RAM you have, and DXVK and the "
-     "graphics driver share that space. Lower texture quality (and view distance) in the game's options, and "
-     "turn on the graphics memory fix.", "dxvk_memory"),
+     "graphics driver share that space. Lower texture quality (and view distance) in the game's options; that "
+     "is the safe fix today.", None),
     ("device_lost", re.compile(r"VK_ERROR_DEVICE_LOST|Device lost|DXGI_ERROR_DEVICE_(REMOVED|HUNG|RESET)",
                                re.IGNORECASE),
      "The graphics driver crashed (device lost)",
@@ -345,8 +350,8 @@ def analyze(texts: dict[str, str], sampler: Sampler | None, settings: Settings, 
     keys = {f.key for f in findings}
     if peak >= 3.5 * GiB and "address_space" not in keys:
         findings.append(Finding("address_space", "The game was close to the 4 GB limit",
-                                f"It used {peak / GiB:.1f} GB of address space. A 32-bit game crashes at 4 GB.",
-                                True, "dxvk_memory"))
+                                f"It used {peak / GiB:.1f} GB of address space. A 32-bit game crashes at 4 GB. "
+                                "Lower texture quality in the game's options.", True))
 
     game = sampler.game if sampler else None
     if game is not None and MARKER not in game.get("env", {}):
@@ -362,7 +367,8 @@ def analyze(texts: dict[str, str], sampler: Sampler | None, settings: Settings, 
                                     "Choose a Wine-Staging build in Crash fixes instead.", True))
 
     nvidia, other = _gpus_text("\n".join(gpus))
-    if nvidia and other and "nvidia_gpu" not in settings.get("fixes", []):
+    picked = game is not None and "DXVK_FILTER_DEVICE_NAME" in game.get("env", {})
+    if nvidia and other and not picked and "nvidia_gpu" not in settings.get("fixes", []):
         findings.append(Finding("hybrid_gpu", "This machine has two graphics chips",
                                 "The game may start on the built-in one. Running it on the NVIDIA card avoids "
                                 "crashes and slowness from that.", False, "nvidia_gpu"))

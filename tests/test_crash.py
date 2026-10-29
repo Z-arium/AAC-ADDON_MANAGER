@@ -31,16 +31,20 @@ class LaunchEnvTests(TempHome):
 
     def test_fixes_and_diagnostics(self):
         s = Settings()
-        crash.set_fix(s, "dxvk_memory", True)
+        crash.set_fix(s, "no_fsync", True)
         crash.set_fix(s, "nvidia_gpu", True)
         crash.set_fix(s, "nvidia_gpu", False)
+        with self.assertRaises(PermissionError):  # not cleared with the ArcheAge Classic team yet
+            crash.set_fix(s, "dxvk_memory", True)
+        s.set("fixes", s.get("fixes") + ["dxvk_memory"])  # even if saved by hand, it isn't applied
         s.set("diagnostics", True)
         env = crash.launch_env(s)
-        self.assertIn("d3d9.maxAvailableMemory", env["DXVK_CONFIG"])
-        self.assertNotIn("__NV_PRIME_RENDER_OFFLOAD", env)
+        self.assertEqual(env["PROTON_NO_FSYNC"], "1")
+        self.assertNotIn("DXVK_CONFIG", env)
+        self.assertNotIn("DXVK_FILTER_DEVICE_NAME", env)
         self.assertEqual(env["DXVK_LOG_PATH"], str(crash.log_dir()))
         self.assertTrue(crash.log_dir().is_dir())
-        self.assertEqual(Settings().get("fixes"), ["dxvk_memory"])
+        self.assertEqual(Settings().get("fixes"), ["no_fsync", "dxvk_memory"])
 
     def test_unknown_fix(self):
         with self.assertRaises(KeyError):
@@ -92,7 +96,7 @@ class AnalyzeTests(TempHome):
         f = self.keys({"logs/archeage_d3d11.log": "err: DxvkDevice: VK_ERROR_DEVICE_LOST"})
         self.assertEqual(f["device_lost"].fix, "wined3d")
         f = self.keys({"official-launcher.log": "E_OUTOFMEMORY"})
-        self.assertEqual(f["address_space"].fix, "dxvk_memory")
+        self.assertIn("texture quality", f["address_space"].detail)
         # What ArcheAge Classic actually logs when its 32-bit address space runs out.
         for line in ("<11:29:36> [392AF52E][Error] *** Memory allocation for 2097172 bytes failed ****",
                      "033c:err:virtual:allocate_virtual_memory out of memory for allocation, base (nil) size 00160000",
@@ -110,11 +114,14 @@ class AnalyzeTests(TempHome):
 
     def test_memory_peak(self):
         s = crash.Sampler(peak={"VmPeak": int(3.8 * GiB)})
-        self.assertEqual(self.keys({}, s)["address_space"].fix, "dxvk_memory")
+        self.assertIn("address_space", self.keys({}, s))
         self.assertNotIn("address_space", self.keys({}, crash.Sampler(peak={"VmPeak": 2 * GiB})))
 
     def test_hybrid_gpu_and_env_blocked(self):
         s = crash.Sampler(game={"pid": 1, "env": {}})
+        picked = crash.Sampler(game={"pid": 1, "env": {"DXVK_FILTER_DEVICE_NAME": "RTX 4070", crash.MARKER: "1"}})
+        gpus4070 = ["Intel Corporation Raptor Lake-P", "NVIDIA Corporation AD106M [GeForce RTX 4070 Max-Q]"]
+        self.assertNotIn("hybrid_gpu", self.keys({}, picked, gpus=gpus4070))
         f = self.keys({}, s, gpus=["Intel Corporation Raptor Lake-S UHD Graphics", "NVIDIA Corporation AD104 [GeForce RTX 4070]"])
         self.assertEqual(f["hybrid_gpu"].fix, "nvidia_gpu")
         self.assertFalse(f["hybrid_gpu"].crash)
@@ -186,11 +193,13 @@ class CliTests(TempHome):
     def test_fixes_command(self):
         out = io.StringIO()
         with redirect_stdout(out):
-            self.assertEqual(cli.main(["fixes", "--on", "dxvk_memory", "--diagnostics", "on"]), 0)
-        self.assertIn("[on ] dxvk_memory", out.getvalue())
+            self.assertEqual(cli.main(["fixes", "--on", "wined3d", "--diagnostics", "on"]), 0)
+        self.assertIn("[on ] wined3d", out.getvalue())
+        self.assertIn("[off] dxvk_memory", out.getvalue())
         self.assertTrue(Settings().get("diagnostics"))
         with redirect_stdout(io.StringIO()):
             self.assertEqual(cli.main(["fixes", "--on", "bogus"]), 1)
+            self.assertEqual(cli.main(["fixes", "--on", "dxvk_memory"]), 1)
 
 
 class RedactTests(TempHome):
