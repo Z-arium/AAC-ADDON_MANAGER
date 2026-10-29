@@ -264,12 +264,20 @@ def cmd_fixes(args, settings):
 
 
 def cmd_wine(args, settings):
+    if args.download_wow64:
+        print(f"Downloading {wine.WOW64_NAME} (about 75 MB)…")
+        build = wine.download_wow64()
+        print(f"Saved to {build}")
+        if not wine.WOW64_CLEARED:
+            print("It stays switched off until the ArcheAge Classic team confirms WoW64 Wine is allowed.")
     if args.set:
         build = Path(args.set).expanduser().resolve()
         if build.name == "wine" and build.parent.name == "bin":
             build = build.parent.parent
         if not os.access(build / "bin/wine", os.X_OK):
             raise CliError(f"no bin/wine in {build}")
+        if not wine.allowed(build):
+            raise CliError("WoW64 Wine builds wait for the ArcheAge Classic team's OK before they can be used")
         settings.set("wine", str(build))
     elif args.launcher:
         settings.set("wine", wine.LAUNCHER)
@@ -280,7 +288,8 @@ def cmd_wine(args, settings):
     chosen = wine.choose(settings.get("wine"))
     print("Wine builds found:")
     for b in wine.builds():
-        print(f"  {'*' if b == chosen else ' '} {wine.label(b)}  {b}")
+        note = "" if wine.allowed(b) else "  (waiting for the ArcheAge Classic team's OK)"
+        print(f"  {'*' if b == chosen else ' '} {wine.label(b)}  {b}{note}")
     if chosen is None:
         print("The official launcher chooses Wine or Proton itself.")
     else:
@@ -352,6 +361,8 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--set", metavar="DIR", help="use this Wine build (a folder with bin/wine)")
     sp.add_argument("--auto", action="store_true", help="pick a Wine-Staging build automatically (default)")
     sp.add_argument("--launcher", action="store_true", help="let the official launcher choose")
+    sp.add_argument("--download-wow64", action="store_true",
+                    help="download a WoW64 Wine-Staging build (used once the ArcheAge Classic team OKs it)")
     sp.add_argument("--prefix", metavar="DIR", help="Wine prefix (default ~/.local/share/AAClassic/wine-staging-pfx)")
     sp = add("crash-report", cmd_crash_report, "collect evidence after a crash into a zip and name known causes")
     sp.add_argument("--minutes", type=int, default=60, help="how far back to look (default 60)")
@@ -367,7 +378,7 @@ def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
         args.fn(args, Settings())
-    except (CliError, installer.InstallError, github.GitHubError, official.LauncherError) as e:
+    except (CliError, installer.InstallError, github.GitHubError, official.LauncherError, wine.WineError) as e:
         print(f"error: {e}", file=sys.stderr)
         return 1
     except KeyboardInterrupt:

@@ -170,6 +170,7 @@ class Sampler:
     peak: dict = field(default_factory=dict)
     min_mem_available: int | None = None
     samples: int = 0
+    last: dict = field(default_factory=dict)
 
     def sample(self, pids=paths.game_pids) -> None:
         found = pids()
@@ -179,6 +180,7 @@ class Sampler:
         if snap is None:
             return
         self.samples += 1
+        self.last = {k: snap[k] for k in STATUS_KEYS if k in snap}
         self.game = {k: v for k, v in snap.items() if k not in STATUS_KEYS} | {"pid": snap["pid"]}
         for key in ("VmPeak", "VmSize", "VmHWM", "VmRSS", "VmSwap", "Threads"):
             if key in snap:
@@ -186,6 +188,22 @@ class Sampler:
         avail = mem_available_kib()
         if avail is not None:
             self.min_mem_available = avail if self.min_mem_available is None else min(self.min_mem_available, avail)
+
+
+    def near_limit(self) -> bool:
+        """True when a 32-bit game is about to run out of its 4 GB of address space."""
+        return near_limit(self.last.get("VmSize", 0))
+
+
+# Measured on ArcheAge Classic: sessions that ran for hours stayed at 3.6-3.8 million kB (3.8 while a zone
+# loads); ones that crashed sat at 3.87-3.92 million kB. Allocations fail before 4 GiB because the space
+# fragments. Above 4 GiB the process is 64-bit (a WoW64 Wine), where the figure means nothing.
+WARN_KIB = 3_850_000
+LIMIT_KIB = 4 * 1024 * 1024
+
+
+def near_limit(vmsize_kib: int) -> bool:
+    return WARN_KIB <= vmsize_kib <= LIMIT_KIB
 
 
 # --- after the game exits -----------------------------------------------------
@@ -348,10 +366,10 @@ def analyze(texts: dict[str, str], sampler: Sampler | None, settings: Settings, 
 
     peak = sampler.peak.get("VmPeak", 0) if sampler else 0
     keys = {f.key for f in findings}
-    if peak >= 3.5 * GiB and "address_space" not in keys:
-        findings.append(Finding("address_space", "The game was close to the 4 GB limit",
-                                f"It used {peak / GiB:.1f} GB of address space. A 32-bit game crashes at 4 GB. "
-                                "Lower texture quality in the game's options.", True))
+    if near_limit(peak) and "address_space" not in keys:
+        findings.append(Finding("address_space_close", "The game came close to its 4 GB limit",
+                                f"It used {peak / 1e6:.2f} GB of its 4 GB. Sessions that crashed sat at 3.87 GB "
+                                "or more. Lower texture quality in the game's options.", False))
 
     game = sampler.game if sampler else None
     if game is not None and MARKER not in game.get("env", {}):
@@ -367,7 +385,9 @@ def analyze(texts: dict[str, str], sampler: Sampler | None, settings: Settings, 
                                     "Choose a Wine-Staging build in Crash fixes instead.", True))
 
     nvidia, other = _gpus_text("\n".join(gpus))
-    picked = game is not None and "DXVK_FILTER_DEVICE_NAME" in game.get("env", {})
+    # The official launcher sets the GPU filter itself and logs it in wine-last.log.
+    picked = (game is not None and "DXVK_FILTER_DEVICE_NAME" in game.get("env", {})) \
+        or "DXVK_FILTER_DEVICE_NAME=" in logs
     if nvidia and other and not picked and "nvidia_gpu" not in settings.get("fixes", []):
         findings.append(Finding("hybrid_gpu", "This machine has two graphics chips",
                                 "The game may start on the built-in one. Running it on the NVIDIA card avoids "

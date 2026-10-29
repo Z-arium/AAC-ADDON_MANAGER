@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import shutil
 import subprocess
 import sys
 import traceback
@@ -276,7 +277,11 @@ class FixesDialog(QDialog):
         self.wine_combo.addItem("Automatic: Wine-Staging when it is installed", None)
         self.wine_combo.addItem("Let the official launcher choose (may pick Proton)", wine.LAUNCHER)
         for build in wine.builds():
-            self.wine_combo.addItem(wine.label(build), str(build))
+            ok = wine.allowed(build)
+            self.wine_combo.addItem(wine.label(build) + ("" if ok else "  (waiting for the ArcheAge Classic team's OK)"),
+                                    str(build))
+            if not ok:
+                self.wine_combo.model().item(self.wine_combo.count() - 1).setEnabled(False)
         current = win.settings.get("wine")
         index = self.wine_combo.findData(current)
         self.wine_combo.setCurrentIndex(max(index, 0))
@@ -356,6 +361,7 @@ class MainWindow(QMainWindow):
         self.jobs: set[Job] = set()
         self.busy = 0
         self.watch: official.GameWatch | None = None
+        self.memory_warned = False
         self.watch_timer = QTimer(self)
         self.watch_timer.setInterval(2000)
         self.watch_timer.timeout.connect(self.poll_game)
@@ -710,6 +716,7 @@ class MainWindow(QMainWindow):
                 QMessageBox.warning(self, APP_NAME, f"Could not start the game: {e}")
                 return
             self.watch = official.GameWatch(proc, sampler=crash.Sampler())
+            self.memory_warned = False
             self.watch_timer.start()
             self.statusBar().showMessage("Official launcher started. Log in and press Play there.")
 
@@ -723,6 +730,7 @@ class MainWindow(QMainWindow):
             return
         state = self.watch.poll()
         if state is None:
+            self._check_memory(self.watch)
             return
         if state == "game":
             self.statusBar().showMessage("ArcheAge Classic is running.")
@@ -751,6 +759,19 @@ class MainWindow(QMainWindow):
             elif box.clickedButton() is copy:
                 self.copy_report()
 
+    def _check_memory(self, watch: official.GameWatch) -> None:
+        """Warn once per session when the 32-bit game is about to run out of its 4 GB."""
+        sampler = watch.sampler
+        if sampler is None or self.memory_warned or not sampler.near_limit():
+            return
+        self.memory_warned = True
+        used = sampler.last.get("VmSize", 0) / 1e6
+        text = (f"ArcheAge Classic is using {used:.2f} of its 4 GB and may crash at the next zone load. "
+                "Lower texture quality in the game's options, or log out somewhere safe.")
+        self.statusBar().showMessage(text)
+        notify(APP_NAME, text)
+        QApplication.alert(self, 0)
+
     def collect_crash(self, sampler: crash.Sampler | None, played: float | None, show: bool) -> None:
         """Gather crash evidence in the background; show it if it points to a crash or if asked."""
 
@@ -765,6 +786,16 @@ class MainWindow(QMainWindow):
 
         self.run("Collecting crash evidence…",
                  lambda: crash.collect(self.settings, sampler, played=played), done)
+
+
+def notify(title: str, text: str) -> None:
+    """A desktop notification, which shows over the game's window."""
+    if shutil.which("notify-send"):
+        try:
+            subprocess.Popen(["notify-send", "-a", APP_NAME, "-u", "critical", title, text],
+                             env=official.environment(True), start_new_session=True)
+        except OSError:
+            pass
 
 
 def main(argv: list[str] | None = None) -> int:
