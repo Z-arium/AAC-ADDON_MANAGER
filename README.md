@@ -34,8 +34,8 @@ Commands that change files refuse to run while ArcheAge is open, because the gam
 
 ## How it works
 
-- Addons live in `<install>/Documents/Addon/<name>/`, each with a `main.lua`. The game loads the folders listed in `Documents/Addon/addons.txt`, one per line. If your install uses `Documents/AAClassic/addons` instead, aacam picks that up.
-- Detection looks for `drive_c/AAClassic*` in `~/.wine`, `$WINEPREFIX`, `~/Games/*` (Lutris), Steam `compatdata/*/pfx` (native and Flatpak), Bottles and Heroic prefixes. The highest-numbered install wins.
+- Addons live in `Documents/AAClassic/Addon/<name>/`, each with a `main.lua`. The game loads the folders listed in `Documents/AAClassic/Addon/addons.txt`, one per line. Wine usually maps the Windows Documents folder to `~/Documents`, so with the official launcher that is `~/Documents/AAClassic/Addon`.
+- Detection checks `~/Documents/AAClassic` (and your XDG Documents folder), then each Wine user's Documents and `drive_c/AAClassic*/Documents/Addon` in `~/.wine`, `$WINEPREFIX`, the official launcher's `~/.local/share/AAClassic/*` prefixes, `~/Games/*` (Lutris), Heroic, Steam `compatdata/*/pfx` (native and Flatpak) and Bottles. A folder that already has `addons.txt` wins.
 - Installs unpack into a staging folder and swap in atomically. An addon's `.data` folder is carried over on update and set aside on remove, then put back if you reinstall.
 - `addons.txt` is backed up to `addons.txt.bak` before every change.
 - Settings: `~/.config/aacam/config.json`. Installed versions: `~/.local/share/aacam/installed.json`. Catalogue cache (1 hour): `~/.cache/aacam/`.
