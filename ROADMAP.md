@@ -1,8 +1,8 @@
 # Roadmap to 1.0
 
-AAC Addon Manager is a free, WowUp-style addon manager for ArcheAge Classic. It will always be free: no paid tier, no ads, no paywalled features.
+AAC Addon Manager is a free, WowUp-style addon manager for ArcheAge Classic, growing into a Linux-first launcher for the game. It will always be free: no paid tier, no ads, no paywalled features.
 
-The order is deliberate. First make installing and updating addons on your own machine boringly reliable, then make it pleasant, then make it easy to get, then package it so the official launcher can ship it. 1.0 is the version we hand to the ArcheAge Classic developers for Linux players. Uploading addons and a store come after that.
+The order is deliberate. First make installing and updating addons on your own machine boringly reliable, then make it pleasant, then make it easy to get, then grow it into a full Linux launcher that wraps the official one. 1.0 is that launcher, with addons built in. Uploading addons and a store come after that.
 
 Each version below has a GitHub milestone with its issues. Dates are not promised; a version ships when its milestone is empty.
 
@@ -44,42 +44,47 @@ Goal: installing the manager is one step on any common Linux setup, and it updat
 - Self-update for the AppImage (AppImageUpdate zsync info, or download-and-replace from GitHub releases).
 - AUR package (`aac-addon-manager-bin`) for Arch and CachyOS users.
 - Flatpak on Flathub, with filesystem access to Wine and Steam prefixes.
-- A Windows build, since the catalogue and the code are not Linux-specific; Windows users get one tool for the same addons.
 - Signed release checksums.
 
-## v0.5: Launcher integration kit
+## v0.5: Game setup and Play
 
-Goal: the ArcheAge Classic developers can drop the addon manager into the official launcher without taking on our UI or our Python setup.
+Goal: our app takes a Linux player from nothing to in game, using the official launcher only for what only it can do.
 
-- Split the engine from the desktop app: a core with no Qt dependency, so the launcher only ships what it needs.
-- A headless interface with machine-readable output (`aacam --json list`, `install`, `update`, `enable`, `disable`, `remove`, `check`), with stable exit codes and progress events on stdout, so a launcher written in any language can drive it.
-- A single self-contained binary of that core for Linux x86_64 (no system Python needed), small enough to bundle in the launcher AppImage.
-- Let the launcher tell us the game's Wine prefix and Documents folder directly (`--prefix` / `--addon-dir` / environment variables), so detection is never a guess when we run inside it.
-- Configurable catalogue source and branding, so the devs can point it at their own addon list later and show it under their name.
-- A license that lets the devs bundle and modify it.
-- `INTEGRATION.md`: how to call it, the JSON schema, where it stores files, and how to update the bundled copy.
-- Reference integration: a demo that drives the headless core the way a launcher would, tested against the official launcher's prefixes.
+The official launcher works and is the reference: it handles account login, game downloads and patching, and already runs the game under Wine. We don't reimplement any of that. We wrap it and fix what is hard on Linux.
 
-## 1.0: In the official launcher
+- Find the official launcher, or download and install it if it is missing.
+- One Play button: update addons, start the official launcher for login and patching, and notice when the game is running and when it exits.
+- Choose the Wine or Proton build the game runs with (the launcher's own, system Wine, GE-Proton), and create or repair the game's prefix.
+- Known Linux fixes as switches, for example DXVK, esync/fsync and the environment variables that stop known crashes, each documented with why.
+- Crash help: collect the game's and Wine's logs after a crash, show the likely cause when we recognise it, and copy a report to share.
+- Never touch the game's own files, the login, or anything the official launcher signs or patches.
 
-Goal: Linux players manage addons from the official ArcheAge Classic launcher, with our engine underneath, and we hand that version to the developers.
+## v0.6: A launcher you'd keep open
 
-- The integration kit, versioned with a frozen 1.0 JSON interface and documented upgrade path.
+Goal: everything a player checks before playing, in one window.
+
+- Game news and patch notes, and server status where there is a public source.
+- Settings for the launcher's behaviour: close or minimise to the tray when the game starts, update addons on start.
+- Desktop integration: menu entry, `.desktop` file, and a Steam non-Steam-game shortcut.
+
+## 1.0: The Linux launcher for ArcheAge Classic
+
+Goal: the app we would recommend to every ArcheAge Classic player on Linux, with addons built in.
+
+- Reliable from install to in game on the official launcher's Wine, Proton (Steam) and Lutris setups, tested before every release.
 - No known data-loss bugs: addon settings and `addons.txt` are never lost by an install, update, remove or crash.
 - Config and data formats are documented and versioned, with migrations from every 0.x release.
-- A release checklist followed for every release, including testing inside the official launcher, Proton and Lutris.
-- A user guide and FAQ with screenshots, for players and for launcher support staff.
-- A hand-off package for the developers: the binary, `INTEGRATION.md`, the demo, test results and a contact for fixes.
-- The standalone AppImage keeps shipping for players who don't use the official launcher.
+- A user guide and FAQ with screenshots, including the crash fixes.
+- A release checklist followed for every release.
 
-### What we need from the developers
+## After 1.0
 
-- Whether they want this at all, and who to talk to.
-- What the launcher is built with, and whether they prefer to call a bundled binary, embed a library, or link out to our app.
-- How the launcher knows the game's prefix and Documents folder, so it can pass them to us.
-- Whether addons should come from the public community catalogue or a list they moderate.
-- Which license terms they need to ship it.
-- Whether the game's addon API or `addons.txt` format will change, and any rules they want enforced on addons.
+These stay planned but no longer block 1.0.
+
+- **Kit for the official launcher:** the addon engine split from our window, a headless JSON interface, a small bundled binary and integration docs, so the game's developers can build addons into their own launcher if they want to. Questions for them: who to talk to, what their launcher is built with, how it knows the game's prefix, which catalogue they want, and which license terms they need.
+- **Profiles and multiple installs:** several game installs with a switcher, addon profiles, export and import of addon lists.
+- **Uploading addons:** validate an addon, publish it by opening a PR to the shared catalogue, `aacam new` template, warnings on unexpected files.
+- **Addon store:** featured, new and popular addons from a static index built by GitHub Actions, and a report-an-addon flow.
 
 ## After 1.0
 
@@ -94,3 +99,4 @@ These stay planned but no longer block 1.0.
 - Anything paid, ads, or accounts required to download addons.
 - Hosting addon files ourselves. Addons stay on their authors' GitHub repos.
 - Game modifications beyond what the game's addon API allows.
+- Replacing the official launcher's login, game downloads or patching.
