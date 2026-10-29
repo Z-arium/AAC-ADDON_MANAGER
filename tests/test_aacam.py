@@ -7,7 +7,7 @@ import zipfile
 from pathlib import Path
 from unittest import mock
 
-from aacam import cli, github, installer, paths, registry
+from aacam import cli, core, github, installer, paths, registry
 
 
 def make_zip(path: Path, files: dict[str, str]) -> Path:
@@ -188,6 +188,41 @@ class CliTests(TempHome):
         self.assertEqual(installer.read_enabled(paths.Install(root, addon_dir)), [])
         self.assertTrue((addon_dir / "Lib/main.lua").is_file())
         self.assertFalse((addon_dir / "App").exists())
+
+    def test_install_from_repo_and_update(self):
+        root = self.home / "Games/aac/drive_c/AAClassic"
+        (root / "Documents/Addon").mkdir(parents=True)
+        versions = iter(["v0.1.0", "v0.2.0"])
+        seen = []
+
+        def fake_release(repo, branch):
+            seen.append((repo, branch))
+            return github.Release(next(versions), repo)
+
+        def fake_download(url, dest):
+            return make_zip(dest, {"r/main.lua": url})
+
+        empty = registry.Registry({})
+        with mock.patch.object(registry.Registry, "load", return_value=empty), \
+             mock.patch.object(github, "latest_release", side_effect=fake_release), \
+             mock.patch.object(github, "download", side_effect=fake_download), \
+             mock.patch.object(paths, "game_running", return_value=False):
+            self.assertEqual(cli.main(["install", "--repo", "Z-arium/aac-dps-meter"]), 0)
+            self.assertEqual(cli.main(["update"]), 0)
+            self.assertEqual(cli.main(["install", "--repo", "not a repo"]), 1)
+            self.assertEqual(cli.main(["install"]), 1)
+
+        addon_dir = root / "Documents/Addon"
+        self.assertTrue((addon_dir / "dps_meter/main.lua").is_file())
+        self.assertIn("dps_meter", installer.read_enabled(paths.Install(root, addon_dir)))
+        self.assertEqual(seen, [("Z-arium/aac-dps-meter", "main")] * 2)
+        db = core.Manager(paths.Install(root, addon_dir)).db.addons["dps_meter"]
+        self.assertEqual((db["version"], db["source"]), ("v0.2.0", "repo"))
+
+    def test_repo_folder_name(self):
+        self.assertEqual(core.repo_folder_name("Z-arium/aac-dps-meter"), "dps_meter")
+        self.assertEqual(core.repo_folder_name("o/ArcheAge_Tools"), "Tools")
+        self.assertEqual(core.repo_folder_name("o/nuzi-ui"), "nuzi_ui")
 
     def test_refuses_while_game_running(self):
         (self.home / ".wine/drive_c/AAClassic/Documents/Addon").mkdir(parents=True)

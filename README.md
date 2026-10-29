@@ -47,6 +47,7 @@ aacam list                    # installed addons, enabled or not, and versions
 aacam update                  # update everything aacam installed (--check to only look)
 aacam disable nuzi-raid       # keeps the files, removes it from addons.txt
 aacam remove nuzi-raid        # keeps saved settings; --purge deletes them
+aacam install --repo Z-arium/aac-dps-meter   # straight from a GitHub repo; updates like the rest
 aacam import ~/Downloads/MyAddon.zip   # an addon that isn't in the catalogue
 
 aacam launch --set 'lutris lutris:rungame/archeage-classic'   # save how you start the game
