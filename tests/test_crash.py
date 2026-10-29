@@ -27,7 +27,7 @@ def fake_proc(root: Path, pid: int, argv: list[str], env: dict[str, str], vmpeak
 
 class LaunchEnvTests(TempHome):
     def test_marker_only_by_default(self):
-        self.assertEqual(crash.launch_env(Settings()), {crash.MARKER: "1"})
+        self.assertEqual(crash.launch_env(Settings(), self.home), {crash.MARKER: "1", "WINEDEBUG": "fixme-all"})
 
     def test_fixes_and_diagnostics(self):
         s = Settings()
@@ -200,3 +200,48 @@ class RedactTests(TempHome):
         self.assertEqual(crash.redact("archeage.exe -t " + "a1" * 20 + " -lang en"), "archeage.exe -t [hidden] -lang en")
         path = "/home/jacob/.local/share/AAClassic/wine-staging-pfx/drive_c/users/steamuser"
         self.assertEqual(crash.redact(path), path)
+
+
+def fake_wine(home: Path, name: str, wow64: bool = False) -> Path:
+    build = home / ".config/heroic/tools/wine" / name
+    (build / "bin").mkdir(parents=True)
+    (build / "bin/wine").write_text("#!/bin/sh\n")
+    (build / "bin/wine").chmod(0o755)
+    (build / "lib/wine/x86_64-unix").mkdir(parents=True)
+    if not wow64:
+        (build / "lib/wine/i386-unix").mkdir(parents=True)
+    return build
+
+
+class WineTests(TempHome):
+    def test_auto_picks_staging_only_with_the_launchers_staging_prefix(self):
+        from aacam import wine
+        staging = fake_wine(self.home, "wine-11.0-staging-amd64")
+        fake_wine(self.home, "wine-ge-8-26")
+        self.assertIsNone(wine.choose(None, self.home))
+        prefix = wine.default_prefix(self.home)
+        prefix.mkdir(parents=True)
+        (prefix / "system.reg").write_text("")
+        self.assertEqual(wine.choose(None, self.home), staging)
+        self.assertIsNone(wine.choose(wine.LAUNCHER, self.home))
+        self.assertFalse(wine.is_wow64(staging))
+        self.assertTrue(wine.is_wow64(fake_wine(self.home, "wine-11.0-staging-amd64-wow64", wow64=True)))
+
+    def test_launch_env_steers_the_official_launcher_away_from_proton(self):
+        from aacam import wine
+        build = fake_wine(self.home, "wine-11.0-staging-amd64")
+        s = Settings()
+        s.set("wine", str(build))
+        env = crash.launch_env(s, self.home)
+        self.assertEqual(env["AAC_WINE"], str(build / "bin/wine"))
+        self.assertEqual(env["WINEPREFIX"], str(wine.default_prefix(self.home)))
+        self.assertIsNone(env["AAC_PROTON"])
+        merged = official.environment(True, base={"PATH": "/usr/bin", "AAC_PROTON": "/x/proton"}, extra=env)
+        self.assertNotIn("AAC_PROTON", merged)
+        self.assertTrue(merged["PATH"].startswith(str(build / "bin")))
+        self.assertEqual(merged["WINEDEBUG"], "fixme-all")
+
+    def test_proton_short_session_is_flagged(self):
+        game = {"pid": 1, "exe": "/home/x/Proton 11.0/files/bin/wine-preloader", "env": {crash.MARKER: "1"}}
+        found = crash.analyze({}, crash.Sampler(game=game), Settings(), [], played=60)
+        self.assertIn("proton_anticheat", {f.key for f in found})

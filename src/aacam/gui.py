@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 import subprocess
 import sys
 import traceback
@@ -39,7 +38,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from . import __version__, crash, github, installer, official, paths, report, syscheck
+from . import __version__, crash, github, installer, official, paths, report, syscheck, wine
 from .config import Settings
 from .core import Manager
 from .registry import Addon, Registry
@@ -242,7 +241,7 @@ class FixesDialog(QDialog):
         super().__init__(win)
         self.win = win
         self.setWindowTitle(f"{APP_NAME}: crash fixes")
-        self.resize(720, 520)
+        self.resize(720, 640)
         lay = QVBoxLayout(self)
         if findings is not None:
             box = QGroupBox("What the last crash shows")
@@ -270,6 +269,27 @@ class FixesDialog(QDialog):
             past = QLabel("Recent sessions:<br>" + "<br>".join(lines))
             past.setTextFormat(Qt.RichText)
             lay.addWidget(past)
+
+        box = QGroupBox("Wine build the game runs with")
+        form = QVBoxLayout(box)
+        self.wine_combo = QComboBox()
+        self.wine_combo.addItem("Automatic: Wine-Staging when it is installed", None)
+        self.wine_combo.addItem("Let the official launcher choose (may pick Proton)", wine.LAUNCHER)
+        for build in wine.builds():
+            self.wine_combo.addItem(wine.label(build), str(build))
+        current = win.settings.get("wine")
+        index = self.wine_combo.findData(current)
+        self.wine_combo.setCurrentIndex(max(index, 0))
+        form.addWidget(self.wine_combo)
+        chosen = wine.choose(current)
+        note = QLabel(
+            (f"Now: {chosen.name}. " if chosen else "Now: the official launcher's own choice. ")
+            + "Under Proton the game's anti-cheat closes it after server select, so Wine-Staging is the safe "
+            "choice. A WoW64 build moves the graphics driver out of the game's 4 GB."
+        )
+        note.setWordWrap(True)
+        form.addWidget(note)
+        lay.addWidget(box)
 
         suggested = {f.fix for f in findings or [] if f.fix}
         on = set(win.settings.get("fixes", []))
@@ -308,6 +328,7 @@ class FixesDialog(QDialog):
         for key, cb in self.boxes.items():
             crash.set_fix(self.win.settings, key, cb.isChecked())
         self.win.settings.set("diagnostics", self.diagnostics.isChecked())
+        self.win.settings.set("wine", self.wine_combo.currentData())
         self.win.statusBar().showMessage("Saved. Fixes apply the next time you press Play.", 6000)
         self.accept()
 
@@ -678,7 +699,7 @@ class MainWindow(QMainWindow):
             try:
                 if command:
                     proc = subprocess.Popen(["sh", "-c", command], start_new_session=True,
-                                            env={**os.environ, **extra})
+                                            env=official.environment(True, extra=extra))
                 else:
                     proc = official.start(appimage, syscheck.has_lib("libfuse.so.2", 64), extra)
             except (official.LauncherError, OSError) as e:

@@ -10,7 +10,7 @@ import textwrap
 import time
 from pathlib import Path
 
-from . import __version__, crash, github, installer, official, paths, report, syscheck
+from . import __version__, crash, github, installer, official, paths, report, syscheck, wine
 from .config import Settings
 from .core import Manager, NotFound
 from .registry import Registry
@@ -194,12 +194,14 @@ def cmd_launch(args, settings):
         cmd_update(args, settings)
     extra = crash.launch_env(settings)
     if command:
-        subprocess.Popen(["sh", "-c", command], start_new_session=True, env={**os.environ, **extra})
+        subprocess.Popen(["sh", "-c", command], start_new_session=True, env=official.environment(True, extra=extra))
         print(f"Started: {command}")
         return
     fuse_ok = syscheck.has_lib("libfuse.so.2", 64)
     official.start(appimage, fuse_ok, extra)
     print(f"Started the official launcher: {appimage}")
+    if extra.get("AAC_WINE"):
+        print(f"Wine: {extra['AAC_WINE']} with prefix {extra['WINEPREFIX']}")
     print(f"Its output goes to {official.log_path()}")
     if settings.get("diagnostics"):
         print(f"Diagnostics on: Wine, Proton and DXVK logs go to {crash.log_dir()}")
@@ -256,6 +258,30 @@ def cmd_fixes(args, settings):
         print(textwrap.indent(textwrap.fill(fix.why, 76), "      "))
     print(f"\nDiagnostics (extra Wine, Proton and DXVK logs): {'on' if settings.get('diagnostics') else 'off'}")
     print("Changes apply the next time you start the game.")
+
+
+def cmd_wine(args, settings):
+    if args.set:
+        build = Path(args.set).expanduser().resolve()
+        if build.name == "wine" and build.parent.name == "bin":
+            build = build.parent.parent
+        if not os.access(build / "bin/wine", os.X_OK):
+            raise CliError(f"no bin/wine in {build}")
+        settings.set("wine", str(build))
+    elif args.launcher:
+        settings.set("wine", wine.LAUNCHER)
+    elif args.auto:
+        settings.set("wine", None)
+    if args.prefix:
+        settings.set("wineprefix", str(Path(args.prefix).expanduser().resolve()))
+    chosen = wine.choose(settings.get("wine"))
+    print("Wine builds found:")
+    for b in wine.builds():
+        print(f"  {'*' if b == chosen else ' '} {wine.label(b)}  {b}")
+    if chosen is None:
+        print("The official launcher chooses Wine or Proton itself.")
+    else:
+        print(f"Using {chosen} with prefix {settings.get('wineprefix') or wine.default_prefix()}")
 
 
 def cmd_crash_report(args, settings):
@@ -319,6 +345,11 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--on", action="append", metavar="FIX", help="turn a fix on (repeatable)")
     sp.add_argument("--off", action="append", metavar="FIX", help="turn a fix off (repeatable)")
     sp.add_argument("--diagnostics", choices=("on", "off"), help="extra Wine, Proton and DXVK logs on the next start")
+    sp = add("wine", cmd_wine, "show or choose the Wine build the official launcher runs the game with")
+    sp.add_argument("--set", metavar="DIR", help="use this Wine build (a folder with bin/wine)")
+    sp.add_argument("--auto", action="store_true", help="pick a Wine-Staging build automatically (default)")
+    sp.add_argument("--launcher", action="store_true", help="let the official launcher choose")
+    sp.add_argument("--prefix", metavar="DIR", help="Wine prefix (default ~/.local/share/AAClassic/wine-staging-pfx)")
     sp = add("crash-report", cmd_crash_report, "collect evidence after a crash into a zip and name known causes")
     sp.add_argument("--minutes", type=int, default=60, help="how far back to look (default 60)")
     sp.add_argument("--history", action="store_true", help="list recent game sessions: length, crash cause, zone")

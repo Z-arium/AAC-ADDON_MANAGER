@@ -37,9 +37,11 @@ In v0.2.1:
 - Known crash causes recognised in that evidence: out of memory (Linux's or the 32-bit game's own 4 GB limit), unhandled exceptions, DXVK device lost, GPU faults, missing Vulkan, esync file limits, two graphics chips, a very short session.
 - Crash fixes as switches, each documented with the crash it avoids: less address space for graphics (DXVK D3D9 settings), NVIDIA card on hybrid graphics, esync/fsync off, WineD3D instead of DXVK. Plus a diagnostics mode for extra logs.
 
+- Choose the Wine build the game runs with: Wine-Staging by default when the official launcher's Wine-Staging prefix exists, because under Proton the anti-cheat (Mail.ru's MRAC) closes the game after server select.
+
 Next, once crash reports from real players show what else is needed:
 
-- Choose the Wine or Proton build the game runs with, and repair the game's prefix.
+- Download a recommended Wine build (a WoW64 build moves the graphics driver out of the game's 4 GB, if the anti-cheat accepts it), and repair the game's prefix.
 - A Steam Deck check on real hardware.
 - Never touch the game's own files, the login, or anything the official launcher signs or patches.
 

@@ -19,7 +19,7 @@ import zipfile
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
-from . import official, paths, report
+from . import official, paths, report, wine
 from .config import Settings, state_dir
 
 # Set on every launch so a report can tell whether our variables reached the game.
@@ -79,9 +79,13 @@ def diagnostics_env(directory: Path) -> dict[str, str]:
     }
 
 
-def launch_env(settings: Settings) -> dict[str, str]:
-    """Variables to add when starting the official launcher, from the user's choices."""
-    env = {MARKER: "1"}
+def launch_env(settings: Settings, home: Path | None = None) -> dict[str, str | None]:
+    """Variables to add (or, as None, remove) when starting the official launcher."""
+    # The anti-cheat polls unsupported winsock calls in a loop; Wine logging each one costs CPU.
+    env: dict[str, str | None] = {MARKER: "1", "WINEDEBUG": "fixme-all"}
+    build = wine.choose(settings.get("wine"), home)
+    if build is not None:
+        env.update(wine.env(build, Path(settings.get("wineprefix") or wine.default_prefix(home))))
     for key in settings.get("fixes", []):
         if key in BY_KEY:
             env.update(BY_KEY[key].env)
@@ -349,6 +353,13 @@ def analyze(texts: dict[str, str], sampler: Sampler | None, settings: Settings, 
         findings.append(Finding("env_blocked", "Our fixes don't reach the game",
                                 "The official launcher starts the game without the variables we pass it, so "
                                 "switches in this launcher have no effect. Please report this.", False))
+
+    if game is not None and played is not None and played < 5 * 60:
+        where = (game.get("exe", "") + " " + " ".join(game.get("env", {}))).lower()
+        if "proton" in where or "steam_compat" in where:
+            findings.append(Finding("proton_anticheat", "The game ran under Proton",
+                                    "Under Proton the game's anti-cheat closes it soon after server select. "
+                                    "Choose a Wine-Staging build in Crash fixes instead.", True))
 
     nvidia, other = _gpus_text("\n".join(gpus))
     if nvidia and other and "nvidia_gpu" not in settings.get("fixes", []):

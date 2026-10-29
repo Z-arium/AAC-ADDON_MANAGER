@@ -93,7 +93,7 @@ def download(dest_dir: Path | None = None, version: str = DEFAULT_VERSION) -> Pa
 
 
 def environment(fuse_ok: bool, base: dict[str, str] | None = None,
-                extra: dict[str, str] | None = None) -> dict[str, str]:
+                extra: dict[str, str | None] | None = None) -> dict[str, str]:
     env = dict(os.environ if base is None else base)
     # Our own AppImage runtime sets these for us; they would break the official one.
     for key in ("APPDIR", "APPIMAGE", "ARGV0", "OWD", "PYTHONHOME", "PYTHONPATH",
@@ -106,12 +106,16 @@ def environment(fuse_ok: bool, base: dict[str, str] | None = None,
         env.pop("LD_LIBRARY_PATH", None)
     if not fuse_ok:
         env["APPIMAGE_EXTRACT_AND_RUN"] = "1"
-    # Crash fixes and diagnostics; Wine passes them on to the game the launcher starts.
-    env.update(extra or {})
+    # Wine choice, crash fixes and diagnostics; the launcher passes them on to the game. None removes one.
+    for key, value in (extra or {}).items():
+        if value is None:
+            env.pop(key, None)
+        else:
+            env[key] = value
     return env
 
 
-def start(appimage: Path, fuse_ok: bool, extra_env: dict[str, str] | None = None) -> subprocess.Popen:
+def start(appimage: Path, fuse_ok: bool, extra_env: dict[str, str | None] | None = None) -> subprocess.Popen:
     """Start the official launcher detached, logging its output."""
     if not appimage.is_file():
         raise LauncherError(f"official launcher not found at {appimage}")
@@ -122,7 +126,8 @@ def start(appimage: Path, fuse_ok: bool, extra_env: dict[str, str] | None = None
     with open(log, "w") as out:
         out.write(f"# {time.strftime('%Y-%m-%d %H:%M:%S')} starting {appimage} (FUSE {'yes' if fuse_ok else 'no'})\n")
         for key, value in sorted((extra_env or {}).items()):
-            out.write(f"# {key}={value}\n")
+            if value is not None and key != "PATH":
+                out.write(f"# {key}={value}\n")
         out.flush()
         return subprocess.Popen(
             [str(appimage)], cwd=appimage.parent, env=environment(fuse_ok, extra=extra_env),

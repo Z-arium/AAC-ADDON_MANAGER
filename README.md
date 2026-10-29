@@ -18,6 +18,7 @@ The first time it opens, **Setup** walks you through three things:
 3. **Your addon folder**: found automatically once the game has run, or chosen by you.
 
 - **Play** updates your addons, then starts the official launcher, where you log in and press Play. While the game runs the app keeps an eye on its memory use. When it closes, the app checks the logs and the kernel for signs of a crash (out of memory, unhandled exceptions, GPU errors, a very short session). If it finds one, it explains it, saves the logs to a crash report zip, and suggests the fix that matches.
+- **Wine build**: the official launcher runs the game with Wine or Proton. Under Proton the game's anti-cheat closes it right after server select, so when the official launcher's Wine-Staging prefix exists, Play points it at a Wine-Staging build from Heroic or Lutris (`AAC_WINE`, `AAC_WINEPREFIX`). You can pick another build, including a WoW64 one, or let the official launcher choose.
 - **Crash fixes** are switches applied the next time the game starts: use less of the 32-bit game's 4 GB for graphics (DXVK settings), run it on the NVIDIA card on machines with two graphics chips, turn off esync/fsync, or draw with WineD3D instead of DXVK. **Diagnostics** records extra Wine, Proton and DXVK logs for one session, for bug reports. All of these are environment variables passed to the official launcher, which passes them to the game. No game files are touched and nothing reads or changes the game's memory, so there is nothing for anti-cheat to object to. Crash reports hide the login token the official launcher writes to its logs, and leave the game's crash dumps out because they can contain it.
 - **My Addons**: everything in your addon folder, a checkbox to turn each one on or off in game, its version, and Update or Remove buttons.
 - **Get Addons**: the public catalogue, with search and tag filters. Install pulls in any addons it depends on.
@@ -60,6 +61,7 @@ aacam launcher --download     # download the official launcher (or --set /path/t
 aacam launch --update-first   # update addons, then start the official launcher
 aacam report                  # system details and the launcher's log, to paste when asking for help
 aacam fixes                   # list crash fixes; --on dxvk_memory, --off wined3d, --diagnostics on
+aacam wine                    # show or choose the Wine build (--set DIR, --auto, --launcher)
 aacam crash-report            # after a crash: collect logs and kernel messages into a zip and name known causes
 aacam crash-report --history  # recent sessions: how long they lasted, crash cause, zone
 aacam launch --set 'lutris lutris:rungame/archeage-classic'   # start the game your own way instead
