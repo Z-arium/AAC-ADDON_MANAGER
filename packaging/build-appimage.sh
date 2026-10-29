@@ -1,5 +1,5 @@
 #!/bin/sh
-# Build dist/AAC-Addon-Manager-x86_64.AppImage. Needs python3 with pip, curl,
+# Build dist/ArcheAge-Classic-Linux-Launcher-x86_64.AppImage. Needs python3 with pip, curl,
 # and network access to PyPI and GitHub. Used by .github/workflows/release.yml.
 set -eu
 
@@ -14,7 +14,7 @@ python3 -m venv "$work/venv"
 "$work/venv/bin/pip" install --quiet ".[gui]" pyinstaller
 
 "$work/venv/bin/pyinstaller" --noconfirm --clean --windowed \
-  --name aac-addon-manager \
+  --name aac-linux-launcher \
   --distpath "$work/pyi" --workpath "$work/pyi-build" --specpath "$work" \
   --collect-data aacam \
   --exclude-module PySide6.QtWebEngineCore --exclude-module PySide6.QtWebEngineWidgets \
@@ -24,21 +24,21 @@ python3 -m venv "$work/venv"
 
 app="$work/AppDir"
 mkdir -p "$app/usr/bin" "$app/usr/share/applications" "$app/usr/share/icons/hicolor/256x256/apps"
-cp -r "$work/pyi/aac-addon-manager/." "$app/usr/bin/"
-cp packaging/aac-addon-manager.desktop "$app/aac-addon-manager.desktop"
-sed -i 's|^Exec=.*|Exec=aac-addon-manager|' "$app/aac-addon-manager.desktop"
-cp "$app/aac-addon-manager.desktop" "$app/usr/share/applications/"
-cp src/aacam/icon.png "$app/aac-addon-manager.png"
-cp src/aacam/icon.png "$app/usr/share/icons/hicolor/256x256/apps/aac-addon-manager.png"
+cp -r "$work/pyi/aac-linux-launcher/." "$app/usr/bin/"
+cp packaging/aac-linux-launcher.desktop "$app/aac-linux-launcher.desktop"
+sed -i 's|^Exec=.*|Exec=aac-linux-launcher|' "$app/aac-linux-launcher.desktop"
+cp "$app/aac-linux-launcher.desktop" "$app/usr/share/applications/"
+cp src/aacam/icon.png "$app/aac-linux-launcher.png"
+cp src/aacam/icon.png "$app/usr/share/icons/hicolor/256x256/apps/aac-linux-launcher.png"
 cat > "$app/AppRun" <<'RUN'
 #!/bin/sh
 here=$(dirname "$(readlink -f "$0")")
-exec "$here/usr/bin/aac-addon-manager" "$@"
+exec "$here/usr/bin/aac-linux-launcher" "$@"
 RUN
 chmod +x "$app/AppRun"
 
 tool="$work/appimagetool"
 curl -fsSL -o "$tool" https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage
 chmod +x "$tool"
-ARCH=x86_64 "$tool" --appimage-extract-and-run "$app" dist/AAC-Addon-Manager-x86_64.AppImage
-echo "Built dist/AAC-Addon-Manager-x86_64.AppImage"
+ARCH=x86_64 "$tool" --appimage-extract-and-run "$app" dist/ArcheAge-Classic-Linux-Launcher-x86_64.AppImage
+echo "Built dist/ArcheAge-Classic-Linux-Launcher-x86_64.AppImage"

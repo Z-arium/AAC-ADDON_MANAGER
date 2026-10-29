@@ -194,7 +194,7 @@ def cmd_launch(args, settings):
 
 
 def build_parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(prog="aacam", description="ArcheAge Classic addon manager for Linux")
+    p = argparse.ArgumentParser(prog="aacam", description="ArcheAge Classic Linux Launcher: addons and game setup")
     p.add_argument("--version", action="version", version=f"aacam {__version__}")
     sub = p.add_subparsers(dest="command", required=True)
 
