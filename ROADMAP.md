@@ -4,6 +4,22 @@ ArcheAge Classic Linux Launcher gets ArcheAge Classic running on Linux and keeps
 
 The vision: anyone on any Linux distro downloads the launcher and ArcheAge Classic works out of the box, with addons supported. So getting the game running comes first, then making everything reliable, then addon polish, then making the launcher easy to get and keep updated. 1.0 is that launcher. Uploading addons and a store come after that.
 
+## Ground rule: nothing that could get a player banned
+
+This applies to every version and every feature, and it wins over anything else in this roadmap.
+
+The launcher works only from the outside, the same way a player does by hand:
+
+- **Game files are never changed.** The game install, its executables, data files and anything the official launcher downloads, patches or verifies stay exactly as the official launcher leaves them.
+- **Nothing touches the running game.** No injecting code or DLLs, no reading or writing game memory, no hooking, no overlays, no packet or network tampering, no automation of input.
+- **Nothing goes near anti-cheat.** We don't disable, bypass, hide from or probe it.
+- **Login and patching stay with the official launcher.** We start it and get out of the way; we never handle credentials.
+- **Addons only through the game's own addon system:** Lua addons in `Documents/AAClassic/Addon` and the `addons.txt` list the game reads. That is the mechanism the game provides for addons.
+- **Linux setup only through the standard layers.** Drivers, FUSE, and Wine/Proton settings that change how Windows runs on Linux, not how the game behaves. Before we ship any Wine/Proton tweak beyond what the official launcher already does, we confirm with the ArcheAge Classic team (Discord) that it is allowed.
+- **Watching the game is read-only.** We only check whether the game's process exists, to know when it started and closed.
+
+A feature that can't meet these rules doesn't ship.
+
 Each version below has a GitHub milestone with its issues. Dates are not promised; a version ships when its milestone is empty.
 
 ## Where we are: v0.1.0
@@ -33,7 +49,7 @@ In v0.2.0:
 Next, in v0.2.1, once we know which crashes Linux players actually hit:
 
 - Choose the Wine or Proton build the game runs with, and repair the game's prefix.
-- Known Linux fixes as switches (DXVK, esync/fsync, environment variables), each documented with the crash it fixes, and recognised in crash reports.
+- Known Linux fixes as switches (Wine/Proton settings and environment variables only), each documented with the crash it fixes, recognised in crash reports, and cleared with the ArcheAge Classic team first per the ground rule above.
 - A Steam Deck check on real hardware.
 - Never touch the game's own files, the login, or anything the official launcher signs or patches.
 
@@ -100,5 +116,5 @@ These stay planned but no longer block 1.0.
 
 - Anything paid, ads, or accounts required to download addons.
 - Hosting addon files ourselves. Addons stay on their authors' GitHub repos.
-- Game modifications beyond what the game's addon API allows.
+- Anything the ground rule above forbids: changing game files, touching the running game or its memory, overlays, automation, or anything near anti-cheat.
 - Replacing the official launcher's login, game downloads or patching.

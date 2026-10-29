@@ -2,6 +2,8 @@
 
 A free app that gets ArcheAge Classic running on Linux and keeps your addons up to date. The official launcher still handles login and patching; this one handles the tweaks and hurdles around it. It checks your system for the drivers the game needs and tells you the exact command to fix what's missing on your distro, finds or downloads the official launcher, starts the game through it, and installs and updates addons. See the [roadmap](ROADMAP.md) for what's next.
 
+**Safe to use:** the launcher never changes game files, never touches the running game or anti-cheat, and never sees your login. It installs addons only through the game's own addon folder and `addons.txt`, and starts the official launcher, which does login and patching itself. See the ground rule in the [roadmap](ROADMAP.md).
+
 ## Desktop app
 
 Download `ArcheAge-Classic-Linux-Launcher-x86_64.AppImage` from the [Releases page](https://github.com/Z-arium/AAC-ADDON_MANAGER/releases), then:
