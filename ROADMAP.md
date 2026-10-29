@@ -21,13 +21,20 @@ The official launcher works and is the reference: it handles account login, game
 
 - Find the official launcher, or download and install it if it is missing.
 - One Play button: update addons, start the official launcher for login and patching, and notice when the game is running and when it exits.
-- Choose the Wine or Proton build the game runs with (the launcher's own, system Wine, GE-Proton), and create or repair the game's prefix.
-- Known Linux fixes as switches, for example DXVK, esync/fsync and the environment variables that stop known crashes, each documented with why.
-- Crash help: collect the game's and Wine's logs after a crash, show the likely cause when we recognise it, and copy a report to share.
-- First-run setup that walks through all of the above, instead of an empty window.
-- Check the system for what the game needs (Vulkan drivers, 32-bit libraries, a working GPU driver) and say in plain words how to fix what is missing on that distro.
-- One AppImage that runs on every mainstream distro: built against an old enough glibc, with Qt and Python bundled.
-- Tested on Ubuntu, Fedora, Arch/CachyOS, Debian, openSUSE, Linux Mint and the Steam Deck before each release.
+In v0.2.0:
+
+- Find the official launcher, or download it from aa-classic.com if it is missing.
+- One Play button: update addons, start the official launcher for login and patching (in extract mode when FUSE 2 is missing), and notice when the game is running and when it exits.
+- Check the system for what the game needs (FUSE 2, Vulkan, a Vulkan driver, 32-bit Vulkan and OpenGL) and give the exact fix command for Arch/CachyOS, SteamOS, Debian/Ubuntu/Mint, Fedora and openSUSE.
+- First-run setup that walks through the system check, the official launcher and the addon folder.
+- Crash help: when the game closes soon after starting, offer Setup and a copyable report with system details and the official launcher's log.
+- One AppImage, built on Ubuntu 22.04's glibc with Qt and Python bundled, that CI starts on Ubuntu 22.04 and 24.04, Debian 12, Fedora, Arch, openSUSE Tumbleweed and Linux Mint before every release.
+
+Next, in v0.2.1, once we know which crashes Linux players actually hit:
+
+- Choose the Wine or Proton build the game runs with, and repair the game's prefix.
+- Known Linux fixes as switches (DXVK, esync/fsync, environment variables), each documented with the crash it fixes, and recognised in crash reports.
+- A Steam Deck check on real hardware.
 - Never touch the game's own files, the login, or anything the official launcher signs or patches.
 
 ## v0.3: Reliable on every machine

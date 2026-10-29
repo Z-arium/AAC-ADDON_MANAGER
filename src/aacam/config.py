@@ -19,6 +19,11 @@ def data_dir() -> Path:
     return Path(base) / "aacam"
 
 
+def state_dir() -> Path:
+    base = os.environ.get("XDG_STATE_HOME") or Path.home() / ".local/state"
+    return Path(base) / "aacam"
+
+
 def cache_dir() -> Path:
     base = os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache"
     return Path(base) / "aacam"
@@ -48,7 +53,8 @@ def _save(path: Path, value: dict[str, Any]) -> None:
 
 
 class Settings:
-    """`addon_dir` is where addons go; `launch` is the command that starts the game."""
+    """`addon_dir` is where addons go; `official_launcher` is the official AppImage;
+    `launch` is a custom command that starts the game instead of it."""
 
     def __init__(self) -> None:
         self.path = config_dir() / "config.json"
