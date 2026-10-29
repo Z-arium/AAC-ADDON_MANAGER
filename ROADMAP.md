@@ -16,7 +16,7 @@ The launcher works only from the outside, the same way a player does by hand:
 - **Login and patching stay with the official launcher.** We start it and get out of the way; we never handle credentials.
 - **Addons only through the game's own addon system:** Lua addons in `Documents/AAClassic/Addon` and the `addons.txt` list the game reads. That is the mechanism the game provides for addons.
 - **Linux setup only through the standard layers.** Drivers, FUSE, and Wine/Proton settings that change how Windows runs on Linux, not how the game behaves. Before we ship any Wine/Proton tweak beyond what the official launcher already does, we confirm with the ArcheAge Classic team (Discord) that it is allowed.
-- **Watching the game is read-only.** We only check whether the game's process exists, to know when it started and closed.
+- **Watching the game is read-only.** We check whether the game's process exists, to know when it started and closed, and read the figures Linux itself publishes about any process (memory in use, which Wine runs it, its environment variables) to explain crashes. We never read or write the game's memory and never attach to it; anti-cheat running inside Wine cannot see these reads.
 
 A feature that can't meet these rules doesn't ship.
 
@@ -46,10 +46,19 @@ In v0.2.0:
 - Crash help: when the game closes soon after starting, offer Setup and a copyable report with system details and the official launcher's log.
 - One AppImage, built on Ubuntu 22.04's glibc with Qt and Python bundled, that CI starts on Ubuntu 22.04 and 24.04, Debian 12, Fedora, Arch, openSUSE Tumbleweed and Linux Mint before every release.
 
-Next, in v0.2.1, once we know which crashes Linux players actually hit:
+In v0.2.1:
 
-- Choose the Wine or Proton build the game runs with, and repair the game's prefix.
-- Known Linux fixes as switches (Wine/Proton settings and environment variables only), each documented with the crash it fixes, recognised in crash reports, and cleared with the ArcheAge Classic team first per the ground rule above.
+- Crash evidence: memory use of the game while it runs, then after it closes the launcher's output, the game's own log and crash file, Wine, Proton and DXVK logs, and the kernel's out-of-memory, segfault and GPU messages, in one zip with login tokens hidden (`aacam crash-report`, or automatic after Play), plus a history of sessions to see whether a fix helps.
+- First real finding (Jacob's machine, 2026-10-29): every crash was the 32-bit game running out of its 4 GB of address space ("Memory allocation … failed", DXVK "InitTexture: map failed"), not the GPU or driver.
+- Known crash causes recognised in that evidence: out of memory (Linux's or the 32-bit game's own 4 GB limit), unhandled exceptions, DXVK device lost, GPU faults, missing Vulkan, esync file limits, two graphics chips, a very short session.
+- Crash fixes as switches, using only variables the official launcher itself knows (NVIDIA card via `DXVK_FILTER_DEVICE_NAME`, `PROTON_NO_ESYNC`/`PROTON_NO_FSYNC`, `PROTON_USE_WINED3D`), each documented with the crash it avoids. Plus a diagnostics mode for extra logs.
+- A DXVK setting that leaves the 32-bit game more of its 4 GB (`DXVK_CONFIG`: report 2 GB of video memory, map less texture memory) is built but switched off until the ArcheAge Classic team confirms it is allowed, per the ground rule above.
+
+- Choose the Wine build the game runs with, through the official launcher's own `AAC_WINE` and `AAC_WINEPREFIX`: Wine-Staging by default when the official launcher's Wine-Staging prefix exists, because under Proton the anti-cheat (Mail.ru's MRAC) closes the game after server select.
+
+Next, once crash reports from real players show what else is needed:
+
+- Download a recommended Wine build (a WoW64 build moves the graphics driver out of the game's 4 GB), once the ArcheAge Classic team confirms it is allowed, and repair the game's prefix.
 - A Steam Deck check on real hardware.
 - Never touch the game's own files, the login, or anything the official launcher signs or patches.
 

@@ -134,10 +134,10 @@ def resolve_user_path(path: Path) -> Install:
     return install_from_root(path)
 
 
-def game_running() -> bool:
-    """True if an ArcheAge process is running under Wine."""
-    proc = Path("/proc")
-    for pid in proc.iterdir():
+def game_pids() -> list[int]:
+    """ArcheAge processes running under Wine, the game itself (argv[0] is archeage.exe) first."""
+    found: list[tuple[bool, int]] = []
+    for pid in Path("/proc").iterdir():
         if not pid.name.isdigit():
             continue
         try:
@@ -145,5 +145,11 @@ def game_running() -> bool:
         except OSError:
             continue
         if b"archeage" in cmdline and b".exe" in cmdline:
-            return True
-    return False
+            argv0 = cmdline.split(b"\0", 1)[0].replace(b"\\", b"/")
+            found.append((not argv0.endswith(b"archeage.exe"), int(pid.name)))
+    return [pid for _, pid in sorted(found)]
+
+
+def game_running() -> bool:
+    """True if an ArcheAge process is running under Wine."""
+    return bool(game_pids())

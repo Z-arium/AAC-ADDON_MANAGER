@@ -8,8 +8,8 @@ import traceback
 from pathlib import Path
 from typing import Any, Callable
 
-from PySide6.QtCore import QObject, QRunnable, Qt, QThreadPool, QTimer, Signal
-from PySide6.QtGui import QAction, QIcon
+from PySide6.QtCore import QObject, QRunnable, Qt, QThreadPool, QTimer, QUrl, Signal
+from PySide6.QtGui import QAction, QDesktopServices, QIcon
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QApplication,
@@ -38,7 +38,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from . import __version__, github, installer, official, paths, report, syscheck
+from . import __version__, crash, github, installer, official, paths, report, syscheck, wine
 from .config import Settings
 from .core import Manager
 from .registry import Addon, Registry
@@ -233,6 +233,114 @@ class SetupDialog(QDialog):
         self.refresh()
 
 
+class FixesDialog(QDialog):
+    """Crash fixes: switches applied the next time the game starts, and what the last crash showed."""
+
+    def __init__(self, win: MainWindow, findings: list[crash.Finding] | None = None,
+                 report_path: Path | None = None) -> None:
+        super().__init__(win)
+        self.win = win
+        self.setWindowTitle(f"{APP_NAME}: crash fixes")
+        self.resize(720, 640)
+        lay = QVBoxLayout(self)
+        if findings is not None:
+            box = QGroupBox("What the last crash shows")
+            form = QVBoxLayout(box)
+            text = QLabel("<br><br>".join(
+                f"<b>{f.title}</b>. {f.detail}" for f in findings
+            ) or "No known cause was found. Turn on diagnostics below and play again to record one.")
+            text.setTextFormat(Qt.RichText)
+            text.setWordWrap(True)
+            form.addWidget(text)
+            if report_path is not None:
+                where = QLabel(f"Everything was saved to {report_path}. Attach it when you ask for help.")
+                where.setWordWrap(True)
+                where.setTextInteractionFlags(Qt.TextSelectableByMouse)
+                form.addWidget(where)
+            lay.addWidget(box)
+
+        recent = crash.history(5)
+        if recent:
+            lines = [
+                f"{h.get('time', '?')[5:16]}: {h.get('minutes') or '?'} min, "
+                + (", ".join(h.get("causes") or []) or ("crashed" if h.get("crashed") else "closed normally"))
+                for h in reversed(recent)
+            ]
+            past = QLabel("Recent sessions:<br>" + "<br>".join(lines))
+            past.setTextFormat(Qt.RichText)
+            lay.addWidget(past)
+
+        box = QGroupBox("Wine build the game runs with")
+        form = QVBoxLayout(box)
+        self.wine_combo = QComboBox()
+        self.wine_combo.addItem("Automatic: Wine-Staging when it is installed", None)
+        self.wine_combo.addItem("Let the official launcher choose (may pick Proton)", wine.LAUNCHER)
+        for build in wine.builds():
+            self.wine_combo.addItem(wine.label(build), str(build))
+        current = win.settings.get("wine")
+        index = self.wine_combo.findData(current)
+        self.wine_combo.setCurrentIndex(max(index, 0))
+        form.addWidget(self.wine_combo)
+        chosen = wine.choose(current)
+        note = QLabel(
+            (f"Now: {chosen.name}. " if chosen else "Now: the official launcher's own choice. ")
+            + "Under Proton the game's anti-cheat closes it after server select, so Wine-Staging is the safe "
+            "choice. A WoW64 build moves the graphics driver out of the game's 4 GB."
+        )
+        note.setWordWrap(True)
+        form.addWidget(note)
+        lay.addWidget(box)
+
+        suggested = {f.fix for f in findings or [] if f.fix}
+        on = set(win.settings.get("fixes", []))
+        box = QGroupBox("Fixes, applied the next time the game starts")
+        form = QVBoxLayout(box)
+        self.boxes: dict[str, QCheckBox] = {}
+        for fix in crash.FIXES:
+            title = fix.title + ("  (suggested)" if fix.key in suggested and fix.key not in on else "")
+            cb = QCheckBox(title)
+            cb.setChecked(fix.cleared and (fix.key in on or fix.key in suggested))
+            cb.setToolTip(fix.why)
+            if not fix.cleared:
+                cb.setEnabled(False)
+                cb.setText(f"{fix.title}  (waiting for the ArcheAge Classic team's OK)")
+            form.addWidget(cb)
+            why = QLabel(fix.why)
+            why.setWordWrap(True)
+            why.setContentsMargins(24, 0, 0, 6)
+            form.addWidget(why)
+            self.boxes[fix.key] = cb
+        self.diagnostics = QCheckBox("Diagnostics: record extra Wine, Proton and DXVK logs (slower, for bug reports)")
+        self.diagnostics.setChecked(bool(win.settings.get("diagnostics")) or (findings is not None and not suggested))
+        form.addWidget(self.diagnostics)
+        lay.addWidget(box)
+
+        buttons = QDialogButtonBox()
+        save = buttons.addButton("Save a crash report now", QDialogButtonBox.ActionRole)
+        save.setToolTip("Collect logs and kernel messages from the last hour into a zip")
+        save.clicked.connect(lambda: win.collect_crash(None, None, show=True))
+        folder = buttons.addButton("Open reports folder", QDialogButtonBox.ActionRole)
+        folder.clicked.connect(self.open_reports)
+        buttons.addButton(QDialogButtonBox.Save)
+        buttons.addButton(QDialogButtonBox.Cancel)
+        buttons.accepted.connect(self.save)
+        buttons.rejected.connect(self.reject)
+        lay.addWidget(buttons)
+
+    def save(self) -> None:
+        for key, cb in self.boxes.items():
+            if cb.isEnabled():
+                crash.set_fix(self.win.settings, key, cb.isChecked())
+        self.win.settings.set("diagnostics", self.diagnostics.isChecked())
+        self.win.settings.set("wine", self.wine_combo.currentData())
+        self.win.statusBar().showMessage("Saved. Fixes apply the next time you press Play.", 6000)
+        self.accept()
+
+    def open_reports(self) -> None:
+        crash.reports_dir().mkdir(parents=True, exist_ok=True)
+        QDesktopServices.openUrl(QUrl.fromLocalFile(str(crash.reports_dir())))
+
+
 # --- main window --------------------------------------------------------------
 
 class MainWindow(QMainWindow):
@@ -280,6 +388,9 @@ class MainWindow(QMainWindow):
         setup = QAction("Setup…", self)
         setup.triggered.connect(self.show_setup)
         bar.addAction(setup)
+        fixes = QAction("Crash fixes…", self)
+        fixes.triggered.connect(lambda: FixesDialog(self).exec())
+        bar.addAction(fixes)
         spacer = QWidget()
         spacer.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         bar.addWidget(spacer)
@@ -588,15 +699,17 @@ class MainWindow(QMainWindow):
             return
 
         def start() -> None:
+            extra = crash.launch_env(self.settings)
             try:
                 if command:
-                    proc = subprocess.Popen(["sh", "-c", command], start_new_session=True)
+                    proc = subprocess.Popen(["sh", "-c", command], start_new_session=True,
+                                            env=official.environment(True, extra=extra))
                 else:
-                    proc = official.start(appimage, syscheck.has_lib("libfuse.so.2", 64))
+                    proc = official.start(appimage, syscheck.has_lib("libfuse.so.2", 64), extra)
             except (official.LauncherError, OSError) as e:
                 QMessageBox.warning(self, APP_NAME, f"Could not start the game: {e}")
                 return
-            self.watch = official.GameWatch(proc)
+            self.watch = official.GameWatch(proc, sampler=crash.Sampler())
             self.watch_timer.start()
             self.statusBar().showMessage("Official launcher started. Log in and press Play there.")
 
@@ -614,18 +727,20 @@ class MainWindow(QMainWindow):
         if state == "game":
             self.statusBar().showMessage("ArcheAge Classic is running.")
             return
+        watch = self.watch
         self.watch_timer.stop()
         self.watch = None
-        if state == "closed":
-            self.statusBar().showMessage("ArcheAge Classic closed.", 6000)
+        if state in ("closed", "crashed"):
+            # A crash later in a session looks like a normal close; the logs tell them apart.
+            self.statusBar().showMessage("ArcheAge Classic closed. Checking for signs of a crash…")
+            self.collect_crash(watch.sampler, watch.played, show=False)
         elif state == "launcher_closed":
             self.statusBar().showMessage("The official launcher closed.", 6000)
         else:
-            what = ("The official launcher stopped with an error" if state == "launcher_failed"
-                    else "ArcheAge Classic closed soon after it started, which usually means it crashed")
             self.statusBar().clearMessage()
             box = QMessageBox(QMessageBox.Warning, APP_NAME,
-                              f"{what}.\n\nSetup shows whether a driver is missing. A report with your system "
+                              "The official launcher stopped with an error.\n\n"
+                              "Setup shows whether a driver is missing. A report with your system "
                               "details and the launcher's log helps anyone who helps you.", parent=self)
             setup = box.addButton("Open setup", QMessageBox.ActionRole)
             copy = box.addButton("Copy report", QMessageBox.ActionRole)
@@ -635,6 +750,21 @@ class MainWindow(QMainWindow):
                 self.show_setup()
             elif box.clickedButton() is copy:
                 self.copy_report()
+
+    def collect_crash(self, sampler: crash.Sampler | None, played: float | None, show: bool) -> None:
+        """Gather crash evidence in the background; show it if it points to a crash or if asked."""
+
+        def done(result: tuple[Path, list[crash.Finding]]) -> None:
+            path, findings = result
+            if not show and not crash.crashed(findings):
+                path.unlink(missing_ok=True)
+                self.statusBar().showMessage("ArcheAge Classic closed.", 6000)
+                return
+            self.statusBar().clearMessage()
+            FixesDialog(self, findings, path).exec()
+
+        self.run("Collecting crash evidence…",
+                 lambda: crash.collect(self.settings, sampler, played=played), done)
 
 
 def main(argv: list[str] | None = None) -> int:

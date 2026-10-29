@@ -92,7 +92,8 @@ def download(dest_dir: Path | None = None, version: str = DEFAULT_VERSION) -> Pa
     return dest
 
 
-def environment(fuse_ok: bool, base: dict[str, str] | None = None) -> dict[str, str]:
+def environment(fuse_ok: bool, base: dict[str, str] | None = None,
+                extra: dict[str, str | None] | None = None) -> dict[str, str]:
     env = dict(os.environ if base is None else base)
     # Our own AppImage runtime sets these for us; they would break the official one.
     for key in ("APPDIR", "APPIMAGE", "ARGV0", "OWD", "PYTHONHOME", "PYTHONPATH",
@@ -105,10 +106,16 @@ def environment(fuse_ok: bool, base: dict[str, str] | None = None) -> dict[str, 
         env.pop("LD_LIBRARY_PATH", None)
     if not fuse_ok:
         env["APPIMAGE_EXTRACT_AND_RUN"] = "1"
+    # Wine choice, crash fixes and diagnostics; the launcher passes them on to the game. None removes one.
+    for key, value in (extra or {}).items():
+        if value is None:
+            env.pop(key, None)
+        else:
+            env[key] = value
     return env
 
 
-def start(appimage: Path, fuse_ok: bool) -> subprocess.Popen:
+def start(appimage: Path, fuse_ok: bool, extra_env: dict[str, str | None] | None = None) -> subprocess.Popen:
     """Start the official launcher detached, logging its output."""
     if not appimage.is_file():
         raise LauncherError(f"official launcher not found at {appimage}")
@@ -118,9 +125,12 @@ def start(appimage: Path, fuse_ok: bool) -> subprocess.Popen:
     log.parent.mkdir(parents=True, exist_ok=True)
     with open(log, "w") as out:
         out.write(f"# {time.strftime('%Y-%m-%d %H:%M:%S')} starting {appimage} (FUSE {'yes' if fuse_ok else 'no'})\n")
+        for key, value in sorted((extra_env or {}).items()):
+            if value is not None and key != "PATH":
+                out.write(f"# {key}={value}\n")
         out.flush()
         return subprocess.Popen(
-            [str(appimage)], cwd=appimage.parent, env=environment(fuse_ok),
+            [str(appimage)], cwd=appimage.parent, env=environment(fuse_ok, extra=extra_env),
             stdout=out, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, start_new_session=True,
         )
 
@@ -140,8 +150,10 @@ class GameWatch:
 
     QUICK_EXIT = 90  # seconds; a game that closes this fast probably crashed
 
-    def __init__(self, proc: subprocess.Popen | None, clock=time.monotonic, running=paths.game_running) -> None:
+    def __init__(self, proc: subprocess.Popen | None, clock=time.monotonic, running=paths.game_running,
+                 sampler=None) -> None:
         self.proc = proc
+        self.sampler = sampler  # a crash.Sampler, fed while the game runs
         self.clock = clock
         self.running = running
         self.state = "launcher"
@@ -152,15 +164,26 @@ class GameWatch:
         if self.state == "launcher":
             if self.running():
                 self.state, self.game_started = "game", self.clock()
+                self._sample()
                 return self.state
             if self.proc is not None and self.proc.poll() is not None:
                 self.state = "launcher_failed" if self.proc.returncode else "launcher_closed"
                 return self.state
-        elif self.state == "game" and not self.running():
+        elif self.state == "game":
+            if self.running():
+                self._sample()
+                return None
             self.played = self.clock() - (self.game_started or self.clock())
             self.state = "crashed" if self.played < self.QUICK_EXIT else "closed"
             return self.state
         return None
+
+    def _sample(self) -> None:
+        if self.sampler is not None:
+            try:
+                self.sampler.sample()
+            except Exception:  # evidence is best effort; never break the watch
+                pass
 
 
 def locate(settings) -> Path | None:
