@@ -13,7 +13,18 @@ python3 -m venv "$work/venv"
 "$work/venv/bin/pip" install --quiet --upgrade pip
 "$work/venv/bin/pip" install --quiet ".[gui]" pyinstaller
 
-"$work/venv/bin/pyinstaller" --noconfirm --clean --windowed \
+# Qt's xcb plugin loads libxcb-cursor at runtime (Qt 6.5+), so PyInstaller can't see it,
+# and many distros don't install it. Bundle it and its helpers so the app opens everywhere.
+# The xcb libraries Qt links directly are bundled by PyInstaller when installed here.
+extra=""
+for lib in libxcb-cursor.so.0 libxcb-render-util.so.0 libxcb-image.so.0 libxcb-util.so.1; do
+  path=$(ldconfig -p | awk -v l="$lib" '$1 == l && /x86-64/ {print $NF; exit}')
+  [ -n "$path" ] || { echo "missing $lib on the build machine" >&2; exit 1; }
+  extra="$extra --add-binary $path:."
+done
+
+# shellcheck disable=SC2086
+"$work/venv/bin/pyinstaller" --noconfirm --clean --windowed $extra \
   --name aac-linux-launcher \
   --distpath "$work/pyi" --workpath "$work/pyi-build" --specpath "$work" \
   --collect-data aacam \
