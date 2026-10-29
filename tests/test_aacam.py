@@ -39,10 +39,39 @@ class TempHome(unittest.TestCase):
 class DetectTests(TempHome):
     def test_finds_lutris_and_proton_highest_first(self):
         (self.home / "Games/archeage-classic/drive_c/AAClassic/Documents/Addon").mkdir(parents=True)
-        (self.home / ".local/share/Steam/steamapps/compatdata/123/pfx/drive_c/AAClassic2").mkdir(parents=True)
+        (self.home / ".local/share/Steam/steamapps/compatdata/123/pfx/drive_c/AAClassic2/Documents/Addon").mkdir(parents=True)
         found = paths.detect(self.home)
         self.assertEqual([i.root.name for i in found], ["AAClassic2", "AAClassic"])
         self.assertEqual(found[1].addon_dir.name, "Addon")
+
+    def test_prefers_documents_addon_folder_used_by_game(self):
+        # Layout on a real CachyOS install with the official AppImage launcher.
+        (self.home / "Documents/AAClassic/Addon").mkdir(parents=True)
+        (self.home / ".local/share/AAClassic/wine-staging-pfx/drive_c/AAClassic").mkdir(parents=True)
+        found = paths.detect(self.home)
+        self.assertEqual([i.addon_dir for i in found], [self.home / "Documents/AAClassic/Addon"])
+        self.assertEqual(
+            paths.resolve_user_path(self.home / "Documents").addon_dir,
+            (self.home / "Documents/AAClassic/Addon").resolve(),
+        )
+
+    def test_wine_user_documents_in_prefix(self):
+        docs = self.home / ".wine/drive_c/users/steamuser/Documents/AAClassic/Addon"
+        docs.mkdir(parents=True)
+        (docs / "addons.txt").write_text("")
+        (self.home / ".wine/drive_c/AAClassic/Documents/Addon").mkdir(parents=True)
+        self.assertEqual(paths.detect(self.home)[0].addon_dir, docs)
+
+    def test_finds_official_launcher_and_heroic_prefixes(self):
+        (self.home / ".local/share/AAClassic/wine-staging-pfx/drive_c/AAClassic").mkdir(parents=True)
+        (self.home / ".local/share/AAClassic/steam-compatdata/pfx/drive_c/AAClassic").mkdir(parents=True)
+        (self.home / "Games/Heroic/Prefixes/Archeage Classic/drive_c/Games/AAClassic").mkdir(parents=True)
+        roots = sorted(str(i.root.relative_to(self.home)) for i in paths.detect(self.home))
+        self.assertEqual(roots, [
+            ".local/share/AAClassic/steam-compatdata/pfx/drive_c/AAClassic",
+            ".local/share/AAClassic/wine-staging-pfx/drive_c/AAClassic",
+            "Games/Heroic/Prefixes/Archeage Classic/drive_c/Games/AAClassic",
+        ])
 
     def test_resolve_user_path_variants(self):
         root = self.home / ".wine/drive_c/AAClassic"
@@ -124,6 +153,14 @@ class RegistryTests(unittest.TestCase):
         self.assertEqual(sorted(reg.addons), ["App", "Lib"])
         self.assertEqual([a.name for a in reg.resolve("app")], ["Lib", "App"])
         self.assertEqual([a.name for a in reg.search("library")], ["Lib"])
+
+
+class GitHubTests(unittest.TestCase):
+    def test_release_zip_names_the_tag(self):
+        with mock.patch.object(github, "get_json", return_value={"tag_name": "main", "zipball_url": "x"}):
+            rel = github.latest_release("o/r", "main")
+        self.assertEqual(rel.version, "main")
+        self.assertEqual(rel.zip_url, "https://codeload.github.com/o/r/zip/refs/tags/main")
 
 
 class CliTests(TempHome):

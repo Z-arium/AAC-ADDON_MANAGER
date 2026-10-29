@@ -5,13 +5,12 @@ from __future__ import annotations
 import argparse
 import subprocess
 import sys
-import tempfile
 import textwrap
-import time
 from pathlib import Path
 
 from . import __version__, github, installer, paths
-from .config import InstalledDb, Settings
+from .config import Settings
+from .core import Manager, NotFound
 from .registry import Registry
 
 
@@ -19,17 +18,17 @@ class CliError(Exception):
     pass
 
 
-def current_install(settings: Settings) -> paths.Install:
-    saved = settings.get("addon_dir")
-    if saved:
-        return paths.resolve_user_path(Path(saved))
-    found = paths.detect()
-    if not found:
+def manager(settings: Settings) -> Manager:
+    mgr = Manager.from_settings(settings)
+    if mgr is None:
         raise CliError(
-            "no ArcheAge Classic install found; run `aacam path /path/to/drive_c/AAClassic`"
+            "no ArcheAge Classic addon folder found; run `aacam path ~/Documents/AAClassic`"
         )
-    settings.set("addon_dir", str(found[0].addon_dir))
-    return found[0]
+    return mgr
+
+
+def current_install(settings: Settings) -> paths.Install:
+    return manager(settings).install
 
 
 def guard_not_running(args: argparse.Namespace) -> None:
@@ -63,18 +62,13 @@ def cmd_path(args, settings):
 
 
 def cmd_list(args, settings):
-    inst = current_install(settings)
-    enabled = set(installer.read_enabled(inst))
-    db = InstalledDb(inst.addon_dir)
-    local = installer.local_addons(inst)
+    mgr = manager(settings)
+    local = mgr.local()
     if not local:
         print("No addons installed.")
-        return
-    for name in local:
-        state = "enabled " if name in enabled else "disabled"
-        version = db.addons.get(name, {}).get("version", "manual")
-        print(f"{state}  {name:<32} {version}")
-    for name in sorted(enabled - set(local) - installer.IGNORED):
+    for a in local:
+        print(f"{'enabled ' if a.enabled else 'disabled'}  {a.name:<32} {a.version}")
+    for name in mgr.missing():
         print(f"missing   {name:<32} (in addons.txt but no folder)")
 
 
@@ -98,67 +92,41 @@ def cmd_info(args, settings):
     print(textwrap.fill(a.description, 78))
 
 
-def _install_one(inst, db, addon, release=None):
-    release = release or github.latest_release(addon.repo, addon.branch)
-    with tempfile.TemporaryDirectory() as tmp:
-        archive = github.download(release.zip_url, Path(tmp) / f"{addon.name}.zip")
-        installer.install_zip(inst, addon.name, archive)
-    installer.restore_kept_data(inst, addon.name)
-    installer.enable(inst, addon.name)
-    db.addons[addon.name] = {
-        "version": release.version,
-        "repo": addon.repo,
-        "commit": release.commit,
-        "installed_at": int(time.time()),
-    }
-    db.save()
-    return release
-
-
 def cmd_install(args, settings):
     guard_not_running(args)
-    inst = current_install(settings)
+    mgr = manager(settings)
     reg = Registry.load()
-    db = InstalledDb(inst.addon_dir)
     for name in args.names:
         try:
-            chain = reg.resolve(name)
-        except KeyError as e:
+            done = mgr.add(reg, name)
+        except NotFound as e:
             raise CliError(f"no addon named {e.args[0]} (try `aacam search`)") from None
-        for addon in chain:
-            if addon.name in db.addons and (inst.addon_dir / addon.name).is_dir() and addon.name != chain[-1].name:
-                continue  # dependency already present
-            release = _install_one(inst, db, addon)
+        for addon, release in done:
             print(f"Installed {addon.name} {release.version}")
 
 
 def cmd_update(args, settings):
     guard_not_running(args)
-    inst = current_install(settings)
-    reg = Registry.load(refresh=True)
-    db = InstalledDb(inst.addon_dir)
-    names = args.names or sorted(db.addons)
-    if not names:
+    mgr = manager(settings)
+    if not mgr.db.addons:
         print("Nothing installed by aacam yet.")
         return
-    updated = 0
-    for name in names:
-        addon = reg.get(name)
-        if addon is None or name not in db.addons:
-            print(f"skip {name}: not installed from the registry")
-            continue
-        release = github.latest_release(addon.repo, addon.branch)
-        if release.version == db.addons[name]["version"]:
-            print(f"{name} is up to date ({release.version})")
-            continue
+    reg = Registry.load(refresh=True)
+    for name in args.names:
+        if name not in mgr.db.addons:
+            print(f"skip {name}: not installed from the catalogue")
+    pending = mgr.check_updates(reg, args.names or None)
+    for name in args.names or sorted(mgr.db.addons):
+        if name in mgr.db.addons and name not in pending:
+            print(f"{name} is up to date ({mgr.db.addons[name]['version']})")
+    for name, release in pending.items():
         if args.check:
-            print(f"{name}: {db.addons[name]['version']} -> {release.version}")
+            print(f"{name}: {mgr.db.addons[name]['version']} -> {release.version}")
             continue
-        _install_one(inst, db, addon, release)
+        mgr.install_one(reg.get(name), release)
         print(f"Updated {name} to {release.version}")
-        updated += 1
     if not args.check:
-        print(f"{updated} updated")
+        print(f"{len(pending)} updated")
 
 
 def cmd_enable(args, settings):
@@ -179,12 +147,9 @@ def cmd_disable(args, settings):
 
 def cmd_remove(args, settings):
     guard_not_running(args)
-    inst = current_install(settings)
-    db = InstalledDb(inst.addon_dir)
+    mgr = manager(settings)
     for name in args.names:
-        installer.remove(inst, name, purge=args.purge)
-        db.addons.pop(name, None)
-        db.save()
+        mgr.remove(name, purge=args.purge)
         print(f"Removed {name}" + ("" if args.purge else " (settings kept)"))
 
 
