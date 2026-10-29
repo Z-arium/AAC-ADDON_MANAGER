@@ -2,6 +2,8 @@
 
 A free desktop app and command-line tool that installs, updates, enables and removes ArcheAge Classic addons when the game runs under the official launcher, Wine, Proton (Steam), Lutris, Bottles or Heroic.
 
+See [ROADMAP.md](ROADMAP.md) for what is planned on the way to 1.0.
+
 ## Desktop app
 
 Download `AAC-Addon-Manager-x86_64.AppImage` from the [Releases page](https://github.com/Z-arium/AAC-ADDON_MANAGER/releases), then:
