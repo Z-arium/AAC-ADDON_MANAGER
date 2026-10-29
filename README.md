@@ -17,7 +17,8 @@ The first time it opens, **Setup** walks you through three things:
 2. **The official launcher**: found where it usually lives, or downloaded from aa-classic.com.
 3. **Your addon folder**: found automatically once the game has run, or chosen by you.
 
-- **Play** updates your addons, then starts the official launcher, where you log in and press Play. If the game closes within a minute and a half of starting, the app offers to open Setup or copy a report with your system details and the launcher's log to share when asking for help.
+- **Play** updates your addons, then starts the official launcher, where you log in and press Play. While the game runs the app keeps an eye on its memory use. When it closes, the app checks the logs and the kernel for signs of a crash (out of memory, unhandled exceptions, GPU errors, a very short session). If it finds one, it explains it, saves everything to a crash report zip, and suggests the fix that matches.
+- **Crash fixes** are switches applied the next time the game starts: let the 32-bit game use 4 GB of memory, run it on the NVIDIA card on machines with two graphics chips, turn off esync/fsync, or draw with WineD3D instead of DXVK. **Diagnostics** records extra Wine, Proton and DXVK logs for one session, for bug reports. All of these are environment variables passed to the official launcher, which passes them to the game; no game files are touched.
 - **My Addons**: everything in your addon folder, a checkbox to turn each one on or off in game, its version, and Update or Remove buttons.
 - **Get Addons**: the public catalogue, with search and tag filters. Install pulls in any addons it depends on.
 - **Update all** checks every addon you installed on startup and updates them in one click.
@@ -58,6 +59,8 @@ aacam doctor                  # check drivers and libraries, print the fix comma
 aacam launcher --download     # download the official launcher (or --set /path/to/it.AppImage)
 aacam launch --update-first   # update addons, then start the official launcher
 aacam report                  # system details and the launcher's log, to paste when asking for help
+aacam fixes                   # list crash fixes; --on large_address, --off wined3d, --diagnostics on
+aacam crash-report            # after a crash: collect logs, kernel messages and dumps into a zip and name known causes
 aacam launch --set 'lutris lutris:rungame/archeage-classic'   # start the game your own way instead
 ```
 

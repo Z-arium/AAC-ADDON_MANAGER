@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import argparse
+import os
 import subprocess
 import sys
 import textwrap
+import time
 from pathlib import Path
 
-from . import __version__, github, installer, official, paths, report, syscheck
+from . import __version__, crash, github, installer, official, paths, report, syscheck
 from .config import Settings
 from .core import Manager, NotFound
 from .registry import Registry
@@ -190,14 +192,18 @@ def cmd_launch(args, settings):
     if args.update_first:
         args.names, args.check, args.force = [], False, False
         cmd_update(args, settings)
+    extra = crash.launch_env(settings)
     if command:
-        subprocess.Popen(["sh", "-c", command], start_new_session=True)
+        subprocess.Popen(["sh", "-c", command], start_new_session=True, env={**os.environ, **extra})
         print(f"Started: {command}")
         return
     fuse_ok = syscheck.has_lib("libfuse.so.2", 64)
-    official.start(appimage, fuse_ok)
+    official.start(appimage, fuse_ok, extra)
     print(f"Started the official launcher: {appimage}")
     print(f"Its output goes to {official.log_path()}")
+    if settings.get("diagnostics"):
+        print(f"Diagnostics on: Wine, Proton and DXVK logs go to {crash.log_dir()}")
+    print("If the game crashes, run `aacam crash-report` afterwards.")
 
 
 def cmd_launcher(args, settings):
@@ -232,6 +238,32 @@ def cmd_doctor(args, settings):
         print(textwrap.indent(fixes, "  "))
     elif all(c.status == syscheck.OK for c in checks) and launcher:
         print("\nEverything the game needs is here.")
+
+
+def cmd_fixes(args, settings):
+    try:
+        for key in args.on or []:
+            crash.set_fix(settings, key, True)
+        for key in args.off or []:
+            crash.set_fix(settings, key, False)
+    except KeyError as e:
+        raise CliError(f"unknown fix {e}; choose from {', '.join(crash.BY_KEY)}") from None
+    if args.diagnostics:
+        settings.set("diagnostics", args.diagnostics == "on")
+    on = set(settings.get("fixes", []))
+    for fix in crash.FIXES:
+        print(f"[{'on ' if fix.key in on else 'off'}] {fix.key}: {fix.title}")
+        print(textwrap.indent(textwrap.fill(fix.why, 76), "      "))
+    print(f"\nDiagnostics (extra Wine, Proton and DXVK logs): {'on' if settings.get('diagnostics') else 'off'}")
+    print("Changes apply the next time you start the game.")
+
+
+def cmd_crash_report(args, settings):
+    since = time.time() - args.minutes * 60
+    print("Collecting logs, kernel messages and crash dumps…")
+    path, findings = crash.collect(settings, since=since)
+    print(crash.summarize(findings), end="")
+    print(f"\nSaved {path}\nAttach that file when you ask for help.")
 
 
 def cmd_report(args, settings):
@@ -278,6 +310,12 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--download", action="store_true", help="download it from aa-classic.com")
     sp.add_argument("--version", default=official.DEFAULT_VERSION, help="launcher version to download")
     add("report", cmd_report, "print a report of your setup to share when asking for help")
+    sp = add("fixes", cmd_fixes, "show or switch the crash fixes applied when the game starts")
+    sp.add_argument("--on", action="append", metavar="FIX", help="turn a fix on (repeatable)")
+    sp.add_argument("--off", action="append", metavar="FIX", help="turn a fix off (repeatable)")
+    sp.add_argument("--diagnostics", choices=("on", "off"), help="extra Wine, Proton and DXVK logs on the next start")
+    sp = add("crash-report", cmd_crash_report, "collect evidence after a crash into a zip and name known causes")
+    sp.add_argument("--minutes", type=int, default=60, help="how far back to look (default 60)")
     sp = add("launch", cmd_launch, "start the game through the official launcher")
     sp.add_argument("--set", metavar="COMMAND",
                     help="start the game with this shell command instead (empty to go back to the official launcher)")

@@ -30,10 +30,15 @@ In v0.2.0:
 - Crash help: when the game closes soon after starting, offer Setup and a copyable report with system details and the official launcher's log.
 - One AppImage, built on Ubuntu 22.04's glibc with Qt and Python bundled, that CI starts on Ubuntu 22.04 and 24.04, Debian 12, Fedora, Arch, openSUSE Tumbleweed and Linux Mint before every release.
 
-Next, in v0.2.1, once we know which crashes Linux players actually hit:
+In v0.2.1:
+
+- Crash evidence: memory use of the game while it runs, then after it closes the launcher's output, game, Proton and DXVK logs, crash dumps, and the kernel's out-of-memory, segfault and GPU messages, in one zip (`aacam crash-report`, or automatic after Play).
+- Known crash causes recognised in that evidence: out of memory (Linux's or the 32-bit game's own 4 GB limit), unhandled exceptions, DXVK device lost, GPU faults, missing Vulkan, esync file limits, two graphics chips, a very short session.
+- Crash fixes as switches, each documented with the crash it avoids: 4 GB large address flag, NVIDIA card on hybrid graphics, esync/fsync off, WineD3D instead of DXVK. Plus a diagnostics mode for extra logs.
+
+Next, once crash reports from real players show what else is needed:
 
 - Choose the Wine or Proton build the game runs with, and repair the game's prefix.
-- Known Linux fixes as switches (DXVK, esync/fsync, environment variables), each documented with the crash it fixes, and recognised in crash reports.
 - A Steam Deck check on real hardware.
 - Never touch the game's own files, the login, or anything the official launcher signs or patches.
 
