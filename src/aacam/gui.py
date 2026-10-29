@@ -15,7 +15,12 @@ from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
     QComboBox,
+    QDialog,
+    QDialogButtonBox,
     QFileDialog,
+    QFormLayout,
+    QGroupBox,
+    QPlainTextEdit,
     QHBoxLayout,
     QHeaderView,
     QInputDialog,
@@ -33,7 +38,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from . import __version__, github, installer, paths
+from . import __version__, github, installer, official, paths, report, syscheck
 from .config import Settings
 from .core import Manager
 from .registry import Addon, Registry
@@ -69,7 +74,7 @@ class Job(QRunnable):
     def run(self) -> None:
         try:
             result = self.fn()
-        except (github.GitHubError, installer.InstallError, OSError) as e:
+        except (github.GitHubError, installer.InstallError, official.LauncherError, OSError) as e:
             self.signals.failed.emit(str(e))
         except Exception:  # keep the window alive and show what went wrong
             self.signals.failed.emit(traceback.format_exc(limit=3))
@@ -98,6 +103,136 @@ def _table(headers: list[str], stretch: int) -> QTableWidget:
     return t
 
 
+# --- setup ---------------------------------------------------------------------
+
+ICON = {syscheck.OK: "✔", syscheck.WARN: "⚠", syscheck.FAIL: "✘"}
+
+
+class SetupDialog(QDialog):
+    """First-run setup, also under Setup in the toolbar: system check, official launcher, addon folder."""
+
+    def __init__(self, win: MainWindow) -> None:
+        super().__init__(win)
+        self.win = win
+        self.setWindowTitle(f"{APP_NAME} setup")
+        self.resize(760, 560)
+        lay = QVBoxLayout(self)
+        intro = QLabel(
+            "Three things get ArcheAge Classic running on Linux: the drivers the game needs, "
+            "the official launcher (it handles login and patching), and your addon folder."
+        )
+        intro.setWordWrap(True)
+        lay.addWidget(intro)
+
+        box = QGroupBox("1. Your system")
+        form = QVBoxLayout(box)
+        self.distro_label = QLabel()
+        form.addWidget(self.distro_label)
+        self.checks_label = QLabel()
+        self.checks_label.setTextFormat(Qt.RichText)
+        self.checks_label.setWordWrap(True)
+        form.addWidget(self.checks_label)
+        self.fixes = QPlainTextEdit()
+        self.fixes.setReadOnly(True)
+        self.fixes.setMaximumHeight(110)
+        form.addWidget(self.fixes)
+        row = QHBoxLayout()
+        self.copy_fixes = QPushButton("Copy fix commands")
+        self.copy_fixes.clicked.connect(lambda: QApplication.clipboard().setText(self.fixes.toPlainText()))
+        row.addWidget(self.copy_fixes)
+        again = QPushButton("Check again")
+        again.clicked.connect(self.refresh)
+        row.addWidget(again)
+        row.addStretch()
+        form.addLayout(row)
+        lay.addWidget(box)
+
+        box = QGroupBox("2. Official ArcheAge Classic launcher")
+        form = QVBoxLayout(box)
+        self.launcher_label = QLabel()
+        self.launcher_label.setWordWrap(True)
+        self.launcher_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        form.addWidget(self.launcher_label)
+        row = QHBoxLayout()
+        self.download_btn = QPushButton("Download it")
+        self.download_btn.clicked.connect(self.download)
+        row.addWidget(self.download_btn)
+        pick = QPushButton("Choose the file…")
+        pick.clicked.connect(self.choose_launcher)
+        row.addWidget(pick)
+        row.addStretch()
+        form.addLayout(row)
+        lay.addWidget(box)
+
+        box = QGroupBox("3. Addon folder")
+        form = QHBoxLayout(box)
+        self.folder_label = QLabel()
+        self.folder_label.setWordWrap(True)
+        form.addWidget(self.folder_label, 1)
+        pick = QPushButton("Change…")
+        pick.clicked.connect(self.choose_folder)
+        form.addWidget(pick)
+        lay.addWidget(box)
+
+        buttons = QDialogButtonBox()
+        copy_report = buttons.addButton("Copy report for help", QDialogButtonBox.ActionRole)
+        copy_report.clicked.connect(self.win.copy_report)
+        buttons.addButton("Done", QDialogButtonBox.AcceptRole)
+        buttons.accepted.connect(self.accept)
+        lay.addWidget(buttons)
+        self.refresh()
+
+    def refresh(self) -> None:
+        d = syscheck.distro()
+        self.distro_label.setText(f"<b>{d.name}</b>")
+        checks = syscheck.run()
+        self.checks_label.setText("<br>".join(
+            f"{ICON[c.status]} <b>{c.title}</b>: {c.detail}" for c in checks
+        ))
+        fixes = syscheck.fix_script(checks)
+        self.fixes.setPlainText(fixes or "Nothing to fix.")
+        self.fixes.setVisible(bool(fixes))
+        self.copy_fixes.setVisible(bool(fixes))
+        launcher = official.locate(self.win.settings)
+        if launcher:
+            self.launcher_label.setText(f"✔ Found: {launcher}")
+            self.download_btn.setText("Download again")
+        else:
+            self.launcher_label.setText(
+                "✘ Not found. Download it here, or choose the AppImage if you already have it."
+            )
+            self.download_btn.setText("Download it")
+        mgr = self.win.mgr
+        self.folder_label.setText(
+            f"✔ {mgr.install.addon_dir}" if mgr else "✘ Not found yet. It appears after the game's first start, "
+            "or choose it now."
+        )
+
+    def download(self) -> None:
+        self.download_btn.setEnabled(False)
+
+        def done(path: Path) -> None:
+            self.download_btn.setEnabled(True)
+            self.win.settings.set("official_launcher", str(path))
+            self.refresh()
+
+        def failed(_message: str) -> None:
+            self.download_btn.setEnabled(True)
+
+        self.win.run("Downloading the official launcher…", lambda: official.download(), done, failed)
+
+    def choose_launcher(self) -> None:
+        start = str(official.default_dir()) if official.default_dir().is_dir() else str(Path.home())
+        chosen, _ = QFileDialog.getOpenFileName(self, "Choose the official launcher", start, "AppImage (*.AppImage);;All files (*)")
+        if chosen:
+            self.win.settings.set("official_launcher", chosen)
+            self.refresh()
+
+    def choose_folder(self) -> None:
+        self.win.choose_folder()
+        self.refresh()
+
+
 # --- main window --------------------------------------------------------------
 
 class MainWindow(QMainWindow):
@@ -112,6 +247,10 @@ class MainWindow(QMainWindow):
         self.pool = QThreadPool.globalInstance()
         self.jobs: set[Job] = set()
         self.busy = 0
+        self.watch: official.GameWatch | None = None
+        self.watch_timer = QTimer(self)
+        self.watch_timer.setInterval(2000)
+        self.watch_timer.timeout.connect(self.poll_game)
 
         self._build_toolbar()
         self.tabs = QTabWidget()
@@ -123,6 +262,8 @@ class MainWindow(QMainWindow):
         self.refresh_installed()
         QTimer.singleShot(0, self.load_registry)
         QTimer.singleShot(0, self.check_app_update)
+        if not self.settings.get("setup_done"):
+            QTimer.singleShot(0, self.show_setup)
 
     # layout
 
@@ -136,6 +277,9 @@ class MainWindow(QMainWindow):
         change = QAction("Change folder…", self)
         change.triggered.connect(self.choose_folder)
         bar.addAction(change)
+        setup = QAction("Setup…", self)
+        setup.triggered.connect(self.show_setup)
+        bar.addAction(setup)
         spacer = QWidget()
         spacer.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         bar.addWidget(spacer)
@@ -146,7 +290,7 @@ class MainWindow(QMainWindow):
         self.update_all_btn.clicked.connect(self.update_all)
         bar.addWidget(self.update_all_btn)
         self.play_btn = QPushButton("Play")
-        self.play_btn.setToolTip("Start the game with your saved launch command")
+        self.play_btn.setToolTip("Update addons, then start the game through the official launcher")
         self.play_btn.clicked.connect(self.play)
         bar.addWidget(self.play_btn)
 
@@ -179,7 +323,10 @@ class MainWindow(QMainWindow):
 
     # background helpers
 
-    def run(self, label: str, fn: Callable[[], Any], done: Callable[[Any], None]) -> None:
+    def run(
+        self, label: str, fn: Callable[[], Any], done: Callable[[Any], None],
+        failed: Callable[[str], None] | None = None,
+    ) -> None:
         job = Job(fn)
         self.jobs.add(job)
         self.busy += 1
@@ -200,6 +347,8 @@ class MainWindow(QMainWindow):
             finish()
             self.statusBar().showMessage("Something went wrong", 5000)
             QMessageBox.warning(self, APP_NAME, message)
+            if failed:
+                failed(message)
 
         job.signals.done.connect(ok)
         job.signals.failed.connect(fail)
@@ -365,8 +514,11 @@ class MainWindow(QMainWindow):
 
         self.run(f"Installing {addon.alias}…", lambda: mgr.add(reg, addon.name), done)
 
-    def update(self, names: list[str]) -> None:
-        if not self._guard() or self.registry is None:
+    def update(self, names: list[str], then: Callable[[], None] | None = None) -> None:
+        """Update addons; `then` runs afterwards whether or not the update worked."""
+        if self.registry is None or not self._guard():
+            if then:
+                then()
             return
         mgr, reg, pending = self.mgr, self.registry, dict(self.updates)
 
@@ -384,8 +536,10 @@ class MainWindow(QMainWindow):
                 self.updates.pop(name, None)
             self.statusBar().showMessage(f"Updated {len(done)} addon{'s' if len(done) != 1 else ''}", 6000)
             self.refresh_installed()
+            if then:
+                then()
 
-        self.run("Updating…", work, finished)
+        self.run("Updating…", work, finished, (lambda _msg: then()) if then else None)
 
     def update_all(self) -> None:
         self.update(sorted(self.updates))
@@ -410,19 +564,77 @@ class MainWindow(QMainWindow):
         self.refresh_installed()
         self.statusBar().showMessage(f"Removed {name}", 4000)
 
+    def show_setup(self) -> None:
+        SetupDialog(self).exec()
+        self.settings.set("setup_done", True)
+        self.mgr = Manager.from_settings(self.settings)
+        self.refresh_installed()
+
+    def copy_report(self) -> None:
+        QApplication.clipboard().setText(report.build(self.settings))
+        self.statusBar().showMessage("Report copied. Paste it where you ask for help.", 6000)
+
     def play(self) -> None:
+        if self.watch is not None:
+            self.statusBar().showMessage("The game is already starting or running.", 4000)
+            return
         command = self.settings.get("launch")
-        if not command:
-            launcher = Path.home() / ".local/share/ArcheAgeClassic/ArcheAgeClassic.AppImage"
-            suggestion = str(launcher) if launcher.exists() else ""
-            command, ok = QInputDialog.getText(
-                self, APP_NAME, "Command that starts the game (saved for next time):", text=suggestion,
+        appimage = None if command else official.locate(self.settings)
+        if not command and appimage is None:
+            QMessageBox.information(
+                self, APP_NAME, "The official ArcheAge Classic launcher isn't set up yet. Let's do that first.",
             )
-            if not ok or not command.strip():
+            self.show_setup()
+            return
+
+        def start() -> None:
+            try:
+                if command:
+                    proc = subprocess.Popen(["sh", "-c", command], start_new_session=True)
+                else:
+                    proc = official.start(appimage, syscheck.has_lib("libfuse.so.2", 64))
+            except (official.LauncherError, OSError) as e:
+                QMessageBox.warning(self, APP_NAME, f"Could not start the game: {e}")
                 return
-            self.settings.set("launch", command.strip())
-        subprocess.Popen(["sh", "-c", self.settings.get("launch")], start_new_session=True)
-        self.statusBar().showMessage("Starting ArcheAge Classic…", 4000)
+            self.watch = official.GameWatch(proc)
+            self.watch_timer.start()
+            self.statusBar().showMessage("Official launcher started. Log in and press Play there.")
+
+        if self.updates and self.mgr is not None and not paths.game_running():
+            self.update(list(self.updates), then=start)
+        else:
+            start()
+
+    def poll_game(self) -> None:
+        if self.watch is None:
+            return
+        state = self.watch.poll()
+        if state is None:
+            return
+        if state == "game":
+            self.statusBar().showMessage("ArcheAge Classic is running.")
+            return
+        self.watch_timer.stop()
+        self.watch = None
+        if state == "closed":
+            self.statusBar().showMessage("ArcheAge Classic closed.", 6000)
+        elif state == "launcher_closed":
+            self.statusBar().showMessage("The official launcher closed.", 6000)
+        else:
+            what = ("The official launcher stopped with an error" if state == "launcher_failed"
+                    else "ArcheAge Classic closed soon after it started, which usually means it crashed")
+            self.statusBar().clearMessage()
+            box = QMessageBox(QMessageBox.Warning, APP_NAME,
+                              f"{what}.\n\nSetup shows whether a driver is missing. A report with your system "
+                              "details and the launcher's log helps anyone who helps you.", parent=self)
+            setup = box.addButton("Open setup", QMessageBox.ActionRole)
+            copy = box.addButton("Copy report", QMessageBox.ActionRole)
+            box.addButton(QMessageBox.Close)
+            box.exec()
+            if box.clickedButton() is setup:
+                self.show_setup()
+            elif box.clickedButton() is copy:
+                self.copy_report()
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -434,6 +646,11 @@ def main(argv: list[str] | None = None) -> int:
     if icon.exists():
         app.setWindowIcon(QIcon(str(icon)))
     win = MainWindow()
+    if "--selftest" in app.arguments():
+        # Used by CI to prove the AppImage starts on each distro: Qt, its plugins and our code load.
+        SetupDialog(win).refresh()
+        print(f"{APP_NAME} {__version__}: window and setup created on {app.platformName()}")
+        return 0
     win.show()
     return app.exec()
 

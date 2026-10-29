@@ -1,6 +1,6 @@
 # ArcheAge Classic Linux Launcher
 
-A free app that gets ArcheAge Classic running on Linux and keeps your addons up to date. The official launcher still handles login and patching; this one handles the tweaks and hurdles around it. Today it installs, updates, enables and removes addons when the game runs under the official launcher, Wine, Proton (Steam), Lutris, Bottles or Heroic, and starts the game; game setup and crash fixes are next on the [roadmap](ROADMAP.md).
+A free app that gets ArcheAge Classic running on Linux and keeps your addons up to date. The official launcher still handles login and patching; this one handles the tweaks and hurdles around it. It checks your system for the drivers the game needs and tells you the exact command to fix what's missing on your distro, finds or downloads the official launcher, starts the game through it, and installs and updates addons. See the [roadmap](ROADMAP.md) for what's next.
 
 ## Desktop app
 
@@ -11,10 +11,16 @@ chmod +x ArcheAge-Classic-Linux-Launcher-x86_64.AppImage
 ./ArcheAge-Classic-Linux-Launcher-x86_64.AppImage
 ```
 
+The first time it opens, **Setup** walks you through three things:
+
+1. **Your system**: FUSE 2, Vulkan, a Vulkan driver, and the 32-bit Vulkan and OpenGL libraries the 32-bit game needs, with copyable fix commands for Arch/CachyOS, SteamOS, Debian/Ubuntu/Mint, Fedora and openSUSE.
+2. **The official launcher**: found where it usually lives, or downloaded from aa-classic.com.
+3. **Your addon folder**: found automatically once the game has run, or chosen by you.
+
+- **Play** updates your addons, then starts the official launcher, where you log in and press Play. If the game closes within a minute and a half of starting, the app offers to open Setup or copy a report with your system details and the launcher's log to share when asking for help.
 - **My Addons**: everything in your addon folder, a checkbox to turn each one on or off in game, its version, and Update or Remove buttons.
 - **Get Addons**: the public catalogue, with search and tag filters. Install pulls in any addons it depends on.
 - **Update all** checks every addon you installed on startup and updates them in one click.
-- **Play** starts the game. The first time, it asks for the launch command (it suggests the official launcher if it finds it).
 - The app tells you in the status bar when a newer version of itself is out.
 
 Running from source instead: `./install.sh` installs both the app (menu entry "ArcheAge Classic Linux Launcher") and the `aacam` command.
@@ -48,8 +54,11 @@ aacam remove nuzi-raid        # keeps saved settings; --purge deletes them
 aacam install --repo Z-arium/aac-dps-meter   # straight from a GitHub repo; updates like the rest
 aacam import ~/Downloads/MyAddon.zip   # an addon that isn't in the catalogue
 
-aacam launch --set 'lutris lutris:rungame/archeage-classic'   # save how you start the game
-aacam launch --update-first   # update addons, then start the game
+aacam doctor                  # check drivers and libraries, print the fix commands for your distro
+aacam launcher --download     # download the official launcher (or --set /path/to/it.AppImage)
+aacam launch --update-first   # update addons, then start the official launcher
+aacam report                  # system details and the launcher's log, to paste when asking for help
+aacam launch --set 'lutris lutris:rungame/archeage-classic'   # start the game your own way instead
 ```
 
 Commands that change files refuse to run while ArcheAge is open, because the game can overwrite `addons.txt` on exit. Pass `--force` to override.

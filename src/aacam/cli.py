@@ -8,7 +8,7 @@ import sys
 import textwrap
 from pathlib import Path
 
-from . import __version__, github, installer, paths
+from . import __version__, github, installer, official, paths, report, syscheck
 from .config import Settings
 from .core import Manager, NotFound
 from .registry import Registry
@@ -175,22 +175,67 @@ def cmd_import(args, settings):
 
 
 def cmd_launch(args, settings):
-    if args.set:
-        settings.set("launch", args.set)
-        print(f"Launch command saved: {args.set}")
+    if args.set is not None:
+        settings.set("launch", args.set or None)
+        print(f"Launch command saved: {args.set}" if args.set else "Using the official launcher again")
         return
     command = settings.get("launch")
-    if not command:
+    appimage = None if command else official.locate(settings)
+    if not command and appimage is None:
         raise CliError(
-            "no launch command set; for example\n"
-            "  aacam launch --set 'lutris lutris:rungame/archeage-classic'\n"
-            "  aacam launch --set 'WINEPREFIX=~/.wine wine \"C:/AAClassic/Launcher.exe\"'"
+            "the official ArcheAge Classic launcher was not found; get it with\n"
+            "  aacam launcher --download\n"
+            "or point at it with `aacam launcher --set /path/to/launcher.AppImage`"
         )
     if args.update_first:
         args.names, args.check, args.force = [], False, False
         cmd_update(args, settings)
-    subprocess.Popen(["sh", "-c", command], start_new_session=True)
-    print(f"Started: {command}")
+    if command:
+        subprocess.Popen(["sh", "-c", command], start_new_session=True)
+        print(f"Started: {command}")
+        return
+    fuse_ok = syscheck.has_lib("libfuse.so.2", 64)
+    official.start(appimage, fuse_ok)
+    print(f"Started the official launcher: {appimage}")
+    print(f"Its output goes to {official.log_path()}")
+
+
+def cmd_launcher(args, settings):
+    if args.set:
+        path = Path(args.set).expanduser().resolve()
+        if not path.is_file():
+            raise CliError(f"{path} does not exist")
+        settings.set("official_launcher", str(path))
+    elif args.download:
+        print(f"Downloading the official launcher {args.version} from aa-classic.com…")
+        path = official.download(version=args.version)
+        settings.set("official_launcher", str(path))
+        print(f"Saved to {path}")
+        return
+    path = official.locate(settings)
+    if path is None:
+        raise CliError("official launcher not found; run `aacam launcher --download`")
+    print(path)
+
+
+def cmd_doctor(args, settings):
+    d = syscheck.distro()
+    print(f"{d.name} ({d.family})\n")
+    checks = syscheck.run()
+    for c in checks:
+        print(f"[{report.MARK[c.status]}] {c.title}: {c.detail}")
+    launcher = official.locate(settings)
+    print(f"[{'ok  ' if launcher else 'FAIL'}] Official launcher: {launcher or 'not found, run `aacam launcher --download`'}")
+    fixes = syscheck.fix_script(checks)
+    if fixes:
+        print("\nTo fix, run:\n")
+        print(textwrap.indent(fixes, "  "))
+    elif all(c.status == syscheck.OK for c in checks) and launcher:
+        print("\nEverything the game needs is here.")
+
+
+def cmd_report(args, settings):
+    print(report.build(settings), end="")
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -227,8 +272,15 @@ def build_parser() -> argparse.ArgumentParser:
     sp = add("import", cmd_import, "install an addon from a local zip", force=True)
     sp.add_argument("zip")
     sp.add_argument("--name", help="folder name (default: zip file name)")
-    sp = add("launch", cmd_launch, "start the game")
-    sp.add_argument("--set", metavar="COMMAND", help="save the shell command that starts the game")
+    add("doctor", cmd_doctor, "check this system for what the game needs, and how to fix it")
+    sp = add("launcher", cmd_launcher, "show, set or download the official ArcheAge Classic launcher")
+    sp.add_argument("--set", metavar="APPIMAGE", help="use this launcher AppImage")
+    sp.add_argument("--download", action="store_true", help="download it from aa-classic.com")
+    sp.add_argument("--version", default=official.DEFAULT_VERSION, help="launcher version to download")
+    add("report", cmd_report, "print a report of your setup to share when asking for help")
+    sp = add("launch", cmd_launch, "start the game through the official launcher")
+    sp.add_argument("--set", metavar="COMMAND",
+                    help="start the game with this shell command instead (empty to go back to the official launcher)")
     sp.add_argument("--update-first", action="store_true", help="update addons before launching")
     return p
 
@@ -237,7 +289,7 @@ def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
         args.fn(args, Settings())
-    except (CliError, installer.InstallError, github.GitHubError) as e:
+    except (CliError, installer.InstallError, github.GitHubError, official.LauncherError) as e:
         print(f"error: {e}", file=sys.stderr)
         return 1
     except KeyboardInterrupt:

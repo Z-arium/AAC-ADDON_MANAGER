@@ -26,6 +26,7 @@ class TempHome(unittest.TestCase):
             "XDG_CONFIG_HOME": str(self.home / "cfg"),
             "XDG_DATA_HOME": str(self.home / "data"),
             "XDG_CACHE_HOME": str(self.home / "cache"),
+            "XDG_STATE_HOME": str(self.home / "state"),
         }
         self._env = mock.patch.dict(os.environ, env)
         self._env.start()

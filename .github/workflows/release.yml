@@ -19,25 +19,79 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - run: sudo apt-get update && sudo apt-get install -y libfuse2 libegl1 libxkbcommon0
+      - run: sudo apt-get update && sudo apt-get install -y libfuse2 libegl1 libxkbcommon0 libxcb-cursor0 xvfb
       - run: pip install PyYAML
       - run: PYTHONPATH=src python -m unittest discover -s tests
         env:
           QT_QPA_PLATFORM: offscreen
       - run: packaging/build-appimage.sh
+      - name: Start the AppImage
+        run: |
+          app=dist/ArcheAge-Classic-Linux-Launcher-x86_64.AppImage
+          $app cli --version
+          $app cli doctor
+          xvfb-run -a $app --selftest
       - uses: actions/upload-artifact@v4
         with:
           name: ArcheAge-Classic-Linux-Launcher-x86_64.AppImage
           path: dist/ArcheAge-Classic-Linux-Launcher-x86_64.AppImage
-      - if: startsWith(github.ref, 'refs/tags/') || (github.event_name == 'workflow_dispatch' && inputs.tag != '')
+
+  distros:
+    # The AppImage has to start on every mainstream distro, without FUSE 2 too.
+    needs: appimage
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - image: ubuntu:22.04
+            setup: apt-get update && apt-get install -y libegl1 libgl1 libfontconfig1 libxkbcommon0 libdbus-1-3
+          - image: ubuntu:24.04
+            setup: apt-get update && apt-get install -y libegl1 libgl1 libfontconfig1 libxkbcommon0 libdbus-1-3
+          - image: debian:12
+            setup: apt-get update && apt-get install -y libegl1 libgl1 libfontconfig1 libxkbcommon0 libdbus-1-3
+          - image: fedora:latest
+            setup: dnf install -y mesa-libEGL mesa-libGL fontconfig libxkbcommon dbus-libs
+          - image: archlinux:latest
+            setup: pacman -Syu --noconfirm libglvnd mesa fontconfig libxkbcommon dbus
+          - image: opensuse/tumbleweed
+            setup: zypper --non-interactive install libEGL1 libGL1 fontconfig libxkbcommon0 libdbus-1-3
+          - image: linuxmintd/mint22-amd64
+            setup: apt-get update && apt-get install -y libegl1 libgl1 libfontconfig1 libxkbcommon0 libdbus-1-3
+    container: ${{ matrix.image }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: ArcheAge-Classic-Linux-Launcher-x86_64.AppImage
+      - run: ${{ matrix.setup }}
+      - name: Start the AppImage (no FUSE in containers, so extract and run)
         env:
+          APPIMAGE_EXTRACT_AND_RUN: "1"
+          QT_QPA_PLATFORM: offscreen
+        run: |
+          chmod +x ArcheAge-Classic-Linux-Launcher-x86_64.AppImage
+          ./ArcheAge-Classic-Linux-Launcher-x86_64.AppImage cli --version
+          ./ArcheAge-Classic-Linux-Launcher-x86_64.AppImage cli doctor
+          ./ArcheAge-Classic-Linux-Launcher-x86_64.AppImage --selftest
+
+  release:
+    # Publish only after the AppImage started on every distro above.
+    needs: [appimage, distros]
+    if: startsWith(github.ref, 'refs/tags/') || (github.event_name == 'workflow_dispatch' && inputs.tag != '')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: ArcheAge-Classic-Linux-Launcher-x86_64.AppImage
+          path: dist
+      - env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ inputs.tag || github.ref_name }}
         run: |
           # The release may already exist if it was drafted on GitHub first.
-          if gh release view "$TAG" >/dev/null 2>&1; then
-            gh release upload "$TAG" dist/ArcheAge-Classic-Linux-Launcher-x86_64.AppImage --clobber
+          if gh release view -R "$GITHUB_REPOSITORY" "$TAG" >/dev/null 2>&1; then
+            gh release upload -R "$GITHUB_REPOSITORY" "$TAG" dist/ArcheAge-Classic-Linux-Launcher-x86_64.AppImage --clobber
           else
-            gh release create "$TAG" dist/ArcheAge-Classic-Linux-Launcher-x86_64.AppImage \
+            gh release create -R "$GITHUB_REPOSITORY" "$TAG" dist/ArcheAge-Classic-Linux-Launcher-x86_64.AppImage \
               --target "$GITHUB_SHA" --title "ArcheAge Classic Linux Launcher $TAG" --generate-notes
           fi
