@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import urllib.error
+import urllib.parse
 import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
@@ -64,7 +65,10 @@ def latest_release(repo: str, branch: str) -> Release:
     try:
         data = get_json(f"{API}/repos/{repo}/releases/latest")
         assert isinstance(data, dict)
-        return Release(data["tag_name"], data["zipball_url"])
+        tag = data["tag_name"]
+        # Name the tag explicitly: the API's zipball_url answers 300 when a tag
+        # shares its name with a branch (one addon tags its releases "main").
+        return Release(tag, f"https://codeload.github.com/{repo}/zip/refs/tags/{urllib.parse.quote(tag)}")
     except GitHubError as e:
         if "returned 404" not in str(e):
             raise

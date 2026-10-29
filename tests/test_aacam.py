@@ -155,6 +155,14 @@ class RegistryTests(unittest.TestCase):
         self.assertEqual([a.name for a in reg.search("library")], ["Lib"])
 
 
+class GitHubTests(unittest.TestCase):
+    def test_release_zip_names_the_tag(self):
+        with mock.patch.object(github, "get_json", return_value={"tag_name": "main", "zipball_url": "x"}):
+            rel = github.latest_release("o/r", "main")
+        self.assertEqual(rel.version, "main")
+        self.assertEqual(rel.zip_url, "https://codeload.github.com/o/r/zip/refs/tags/main")
+
+
 class CliTests(TempHome):
     def test_install_flow_with_fake_github(self):
         root = self.home / "Games/aac/drive_c/AAClassic"
