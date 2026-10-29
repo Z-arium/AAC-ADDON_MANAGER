@@ -1,8 +1,29 @@
-# aacam: ArcheAge Classic addon manager for Linux
+# AAC Addon Manager: ArcheAge Classic addons on Linux
 
-A command-line tool that installs, updates, enables and removes ArcheAge Classic addons when the game runs under Wine, Proton (Steam), Lutris, Bottles or Heroic. It reads the same public addon catalogue as Classic Addon Manager ([classic-addon-manager/addons](https://github.com/classic-addon-manager/addons)) and downloads addons straight from their GitHub releases.
+A free desktop app and command-line tool that installs, updates, enables and removes ArcheAge Classic addons when the game runs under the official launcher, Wine, Proton (Steam), Lutris, Bottles or Heroic.
 
-## Install
+## Desktop app
+
+Download `AAC-Addon-Manager-x86_64.AppImage` from the [Releases page](https://github.com/Z-arium/AAC-ADDON_MANAGER/releases), then:
+
+```bash
+chmod +x AAC-Addon-Manager-x86_64.AppImage
+./AAC-Addon-Manager-x86_64.AppImage
+```
+
+- **My Addons**: everything in your addon folder, a checkbox to turn each one on or off in game, its version, and Update or Remove buttons.
+- **Get Addons**: the public catalogue, with search and tag filters. Install pulls in any addons it depends on.
+- **Update all** checks every addon you installed on startup and updates them in one click.
+- **Play** starts the game. The first time, it asks for the launch command (it suggests the official launcher if it finds it).
+- The app tells you in the status bar when a newer version of itself is out.
+
+Running from source instead: `./install.sh` installs both the app (menu entry "AAC Addon Manager") and the `aacam` command.
+
+## Command line
+
+`aacam` does the same from a terminal. It reads the same public addon catalogue as Classic Addon Manager ([classic-addon-manager/addons](https://github.com/classic-addon-manager/addons)) and downloads addons straight from their GitHub releases.
+
+### Install
 
 ```bash
 git clone https://github.com/Z-arium/AAC-ADDON_MANAGER
@@ -12,11 +33,11 @@ cd AAC-ADDON_MANAGER
 
 `install.sh` needs only Python 3. It puts aacam in its own virtualenv under `~/.local/share/aacam/venv` and links it to `~/.local/bin/aacam`; run it again after `git pull` to upgrade. If you prefer pipx: `pipx install .`
 
-## Use
+### Use
 
 ```bash
 aacam detect                  # find AAClassic inside your Wine/Proton/Lutris prefixes
-aacam path ~/Games/archeage-classic/drive_c/AAClassic   # or set it yourself
+aacam path ~/Documents/AAClassic   # or set it yourself
 aacam search raid             # browse the catalogue
 aacam info nuzi-raid
 aacam install nuzi-raid       # installs dependencies too, and enables it
@@ -46,3 +67,7 @@ Commands that change files refuse to run while ArcheAge is open, because the gam
 ```bash
 PYTHONPATH=src python3 -m unittest discover -s tests
 ```
+
+## Releasing
+
+Push a tag like `v0.2.0` (bump `version` in `pyproject.toml` and `src/aacam/__init__.py` first). The release workflow runs the tests, builds the AppImage with PyInstaller and appimagetool, and attaches it to a GitHub release. Pull requests build the AppImage too and keep it as a workflow artifact.

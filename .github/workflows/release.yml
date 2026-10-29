@@ -1,0 +1,32 @@
+name: release
+on:
+  push:
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  appimage:
+    # Oldest supported runner, so the AppImage runs on older glibc too.
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: sudo apt-get update && sudo apt-get install -y libfuse2 libegl1 libxkbcommon0
+      - run: PYTHONPATH=src python -m unittest discover -s tests
+        env:
+          QT_QPA_PLATFORM: offscreen
+      - run: packaging/build-appimage.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: AAC-Addon-Manager-x86_64.AppImage
+          path: dist/AAC-Addon-Manager-x86_64.AppImage
+      - if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" dist/AAC-Addon-Manager-x86_64.AppImage \
+            --title "AAC Addon Manager $GITHUB_REF_NAME" --generate-notes

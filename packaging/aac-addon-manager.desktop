@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=AAC Addon Manager
+Comment=Install and update ArcheAge Classic addons
+Exec=aacam-gui
+Icon=aac-addon-manager
+Categories=Game;Utility;
+Keywords=ArcheAge;addons;mods;
+Terminal=false
