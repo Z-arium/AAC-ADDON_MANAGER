@@ -31,16 +31,16 @@ class LaunchEnvTests(TempHome):
 
     def test_fixes_and_diagnostics(self):
         s = Settings()
-        crash.set_fix(s, "large_address", True)
+        crash.set_fix(s, "dxvk_memory", True)
         crash.set_fix(s, "nvidia_gpu", True)
         crash.set_fix(s, "nvidia_gpu", False)
         s.set("diagnostics", True)
         env = crash.launch_env(s)
-        self.assertEqual(env["WINE_LARGE_ADDRESS_AWARE"], "1")
+        self.assertIn("d3d9.maxAvailableMemory", env["DXVK_CONFIG"])
         self.assertNotIn("__NV_PRIME_RENDER_OFFLOAD", env)
         self.assertEqual(env["DXVK_LOG_PATH"], str(crash.log_dir()))
         self.assertTrue(crash.log_dir().is_dir())
-        self.assertEqual(Settings().get("fixes"), ["large_address"])
+        self.assertEqual(Settings().get("fixes"), ["dxvk_memory"])
 
     def test_unknown_fix(self):
         with self.assertRaises(KeyError):
@@ -92,7 +92,12 @@ class AnalyzeTests(TempHome):
         f = self.keys({"logs/archeage_d3d11.log": "err: DxvkDevice: VK_ERROR_DEVICE_LOST"})
         self.assertEqual(f["device_lost"].fix, "wined3d")
         f = self.keys({"official-launcher.log": "E_OUTOFMEMORY"})
-        self.assertEqual(f["address_space"].fix, "large_address")
+        self.assertEqual(f["address_space"].fix, "dxvk_memory")
+        # What ArcheAge Classic actually logs when its 32-bit address space runs out.
+        for line in ("<11:29:36> [392AF52E][Error] *** Memory allocation for 2097172 bytes failed ****",
+                     "033c:err:virtual:allocate_virtual_memory out of memory for allocation, base (nil) size 00160000",
+                     "err:   D3D9: InitTexture: map failed"):
+            self.assertIn("address_space", self.keys({"logs/ArcheAge.log": line}))
         f = self.keys({"journal.txt": "kernel: Out of memory: Killed process 4242 (archeage.exe) total-vm:4000000kB"})
         self.assertIn("oom_killed", f)
         f = self.keys({"journal.txt": "kernel: NVRM: Xid (PCI:0000:01:00): 13, pid=4242, name=archeage.exe"})
@@ -105,9 +110,8 @@ class AnalyzeTests(TempHome):
 
     def test_memory_peak(self):
         s = crash.Sampler(peak={"VmPeak": int(3.8 * GiB)})
-        self.assertEqual(self.keys({}, s)["address_space"].fix, "large_address")
-        s = crash.Sampler(peak={"VmPeak": 2 * GiB})
-        self.assertIn("address_space_2g", self.keys({}, s))
+        self.assertEqual(self.keys({}, s)["address_space"].fix, "dxvk_memory")
+        self.assertNotIn("address_space", self.keys({}, crash.Sampler(peak={"VmPeak": 2 * GiB})))
 
     def test_hybrid_gpu_and_env_blocked(self):
         s = crash.Sampler(game={"pid": 1, "env": {}})
@@ -129,7 +133,14 @@ class CollectTests(TempHome):
         started = time.time() - 60
         docs = self.home / "Documents/AAClassic"
         docs.mkdir(parents=True)
-        (docs / "Game.log").write_text("loading\nUnhandled exception: page fault\n")
+        (docs / "Game.log").write_text("* LOADING: 'e_sunrise_peninsula_2' loading time: 2.1 seconds\n"
+                                       "Unhandled exception: page fault\n")
+        (docs / "archeage.crash").write_text("Exception Code: 0xC0000005\n")
+        (docs / "x.dmp").write_bytes(b"MDMP")
+        aac = self.home / ".local/share/AAClassic"
+        (aac / "wine-staging-pfx/drive_c").mkdir(parents=True)
+        (aac / "wine-staging-pfx/drive_c/deep.log").write_text("too deep")
+        (aac / "launcher.log").write_text("gateway OK token=s3cr3t-value\n")
         (docs / "Addon").mkdir()
         (docs / "Addon/old.log").write_text("ignored")
         (self.home / "steam-12345.log").write_text("proton log")
@@ -145,12 +156,22 @@ class CollectTests(TempHome):
         with zipfile.ZipFile(path) as z:
             names = set(z.namelist())
             self.assertTrue({"summary.txt", "details.json", "report.txt", "journal.txt",
-                             "official-launcher.log", "logs/Game.log", "logs/steam-12345.log"} <= names)
+                             "official-launcher.log", "logs/Game.log", "logs/steam-12345.log",
+                             "logs/archeage.crash", "logs/launcher.log"} <= names)
+            self.assertNotIn("logs/deep.log", names)
+            self.assertFalse(any(n.endswith(".dmp") for n in names))  # dumps can hold the login token
+            self.assertNotIn("s3cr3t", z.read("logs/launcher.log").decode())
             self.assertNotIn("logs/notes.txt", names)
             self.assertNotIn("logs/old.log", names)
             details = json.loads(z.read("details.json"))
         self.assertEqual(details["played_seconds"], 600)
         self.assertEqual(details["findings"][0]["key"], "unhandled")
+        self.assertTrue(details["dumps_not_included"][0].endswith("x.dmp"))
+        h = crash.history()
+        self.assertEqual(len(h), 1)
+        self.assertEqual(h[0]["zone"], "e_sunrise_peninsula_2")
+        self.assertEqual(h[0]["minutes"], 10.0)
+        self.assertTrue(h[0]["crashed"])
 
     def test_prune_keeps_ten(self):
         d = crash.reports_dir()
@@ -165,8 +186,17 @@ class CliTests(TempHome):
     def test_fixes_command(self):
         out = io.StringIO()
         with redirect_stdout(out):
-            self.assertEqual(cli.main(["fixes", "--on", "large_address", "--diagnostics", "on"]), 0)
-        self.assertIn("[on ] large_address", out.getvalue())
+            self.assertEqual(cli.main(["fixes", "--on", "dxvk_memory", "--diagnostics", "on"]), 0)
+        self.assertIn("[on ] dxvk_memory", out.getvalue())
         self.assertTrue(Settings().get("diagnostics"))
         with redirect_stdout(io.StringIO()):
             self.assertEqual(cli.main(["fixes", "--on", "bogus"]), 1)
+
+
+class RedactTests(TempHome):
+    def test_hides_tokens_but_not_paths(self):
+        self.assertEqual(crash.redact("token=abc123"), "token=[hidden]")
+        self.assertEqual(crash.redact('"sessionToken": "xyz"'), '"sessionToken": "[hidden]"')
+        self.assertEqual(crash.redact("archeage.exe -t " + "a1" * 20 + " -lang en"), "archeage.exe -t [hidden] -lang en")
+        path = "/home/jacob/.local/share/AAClassic/wine-staging-pfx/drive_c/users/steamuser"
+        self.assertEqual(crash.redact(path), path)

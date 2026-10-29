@@ -32,9 +32,10 @@ In v0.2.0:
 
 In v0.2.1:
 
-- Crash evidence: memory use of the game while it runs, then after it closes the launcher's output, game, Proton and DXVK logs, crash dumps, and the kernel's out-of-memory, segfault and GPU messages, in one zip (`aacam crash-report`, or automatic after Play).
+- Crash evidence: memory use of the game while it runs, then after it closes the launcher's output, the game's own log and crash file, Wine, Proton and DXVK logs, and the kernel's out-of-memory, segfault and GPU messages, in one zip with login tokens hidden (`aacam crash-report`, or automatic after Play), plus a history of sessions to see whether a fix helps.
+- First real finding (Jacob's machine, 2026-10-29): every crash was the 32-bit game running out of its 4 GB of address space ("Memory allocation … failed", DXVK "InitTexture: map failed"), not the GPU or driver.
 - Known crash causes recognised in that evidence: out of memory (Linux's or the 32-bit game's own 4 GB limit), unhandled exceptions, DXVK device lost, GPU faults, missing Vulkan, esync file limits, two graphics chips, a very short session.
-- Crash fixes as switches, each documented with the crash it avoids: 4 GB large address flag, NVIDIA card on hybrid graphics, esync/fsync off, WineD3D instead of DXVK. Plus a diagnostics mode for extra logs.
+- Crash fixes as switches, each documented with the crash it avoids: less address space for graphics (DXVK D3D9 settings), NVIDIA card on hybrid graphics, esync/fsync off, WineD3D instead of DXVK. Plus a diagnostics mode for extra logs.
 
 Next, once crash reports from real players show what else is needed:
 

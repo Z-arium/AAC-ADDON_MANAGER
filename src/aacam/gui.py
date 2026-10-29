@@ -260,6 +260,17 @@ class FixesDialog(QDialog):
                 form.addWidget(where)
             lay.addWidget(box)
 
+        recent = crash.history(5)
+        if recent:
+            lines = [
+                f"{h.get('time', '?')[5:16]}: {h.get('minutes') or '?'} min, "
+                + (", ".join(h.get("causes") or []) or ("crashed" if h.get("crashed") else "closed normally"))
+                for h in reversed(recent)
+            ]
+            past = QLabel("Recent sessions:<br>" + "<br>".join(lines))
+            past.setTextFormat(Qt.RichText)
+            lay.addWidget(past)
+
         suggested = {f.fix for f in findings or [] if f.fix}
         on = set(win.settings.get("fixes", []))
         box = QGroupBox("Fixes, applied the next time the game starts")

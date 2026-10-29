@@ -259,6 +259,11 @@ def cmd_fixes(args, settings):
 
 
 def cmd_crash_report(args, settings):
+    if args.history:
+        for h in crash.history():
+            causes = ", ".join(h.get("causes") or []) or ("crashed" if h.get("crashed") else "closed normally")
+            print(f"{h.get('time')}  {h.get('minutes') or '?':>6} min  {causes}  {h.get('zone') or ''}")
+        return
     since = time.time() - args.minutes * 60
     print("Collecting logs, kernel messages and crash dumps…")
     path, findings = crash.collect(settings, since=since)
@@ -316,6 +321,7 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--diagnostics", choices=("on", "off"), help="extra Wine, Proton and DXVK logs on the next start")
     sp = add("crash-report", cmd_crash_report, "collect evidence after a crash into a zip and name known causes")
     sp.add_argument("--minutes", type=int, default=60, help="how far back to look (default 60)")
+    sp.add_argument("--history", action="store_true", help="list recent game sessions: length, crash cause, zone")
     sp = add("launch", cmd_launch, "start the game through the official launcher")
     sp.add_argument("--set", metavar="COMMAND",
                     help="start the game with this shell command instead (empty to go back to the official launcher)")

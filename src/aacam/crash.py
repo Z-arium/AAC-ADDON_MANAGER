@@ -35,10 +35,14 @@ class Fix:
 
 
 FIXES: tuple[Fix, ...] = (
-    Fix("large_address", "Let the game use 4 GB of memory",
-        "ArcheAge Classic is a 32-bit game. Without this flag Wine may give it only 2 GB of address space, "
-        "and it crashes when that runs out, typically after a while in busy areas or on loading screens.",
-        {"WINE_LARGE_ADDRESS_AWARE": "1"}),
+    Fix("dxvk_memory", "Use less of the game's 4 GB of memory for graphics",
+        "ArcheAge Classic is a 32-bit game: everything it loads, plus DXVK and the graphics driver, has to fit "
+        "in 4 GB however much RAM you have. When that fills up it crashes with \"Memory allocation failed\", "
+        "often after a zone loads. This tells the game it has 2 GB of video memory, so it keeps fewer textures "
+        "around, and keeps less texture memory mapped in DXVK. Lowering texture quality in the game's options "
+        "helps the most.",
+        {"DXVK_CONFIG": "d3d9.maxAvailableMemory = 2048; d3d9.textureMemory = 32; "
+                        "dxvk.trackPipelineLifetime = True"}),
     Fix("nvidia_gpu", "Run the game on the NVIDIA card",
         "On machines with Intel or AMD graphics plus an NVIDIA card, the game can start on the built-in chip "
         "or switch between them, which crashes DXVK or makes it very slow.",
@@ -211,15 +215,18 @@ def journal(since: float) -> str:
     return "Kernel:\n" + ("\n".join(lines[-200:]) or "(nothing relevant)") + "\n\nCore dumps:\n" + (dumps or "(none)") + "\n"
 
 
-LOG_SUFFIXES = {".log", ".txt", ".dmp", ".mdmp", ".err"}
+LOG_SUFFIXES = {".log", ".txt", ".dmp", ".mdmp", ".err", ".crash"}
 TEXT_LIMIT = 256 * 1024
-DUMP_LIMIT = 64 * 1024 * 1024
+DUMPS = {".dmp", ".mdmp"}
 
 
 def game_files(since: float, game: dict | None, home: Path | None = None) -> list[Path]:
     """Logs and crash dumps the game, Wine, Proton or DXVK wrote since the game started."""
     home = home or Path.home()
-    dirs: list[Path] = [log_dir(), home]  # Proton writes steam-<appid>.log to $HOME by default
+    # Proton writes steam-<appid>.log to $HOME; the official launcher keeps launcher.log and
+    # wine-last.log next to its prefixes, so those two folders are only looked at one level deep.
+    shallow = {home, home / ".local/share/AAClassic"}
+    dirs: list[Path] = [log_dir(), *shallow]
     for docs in paths.documents_dirs(home):
         dirs.append(docs / "AAClassic")
     if game and game.get("cwd"):
@@ -228,7 +235,7 @@ def game_files(since: float, game: dict | None, home: Path | None = None) -> lis
     found: list[Path] = []
     seen: set[Path] = set()
     for d in dirs:
-        depth = 1 if d == home else 2
+        depth = 1 if d in shallow else 2
         for p in _walk(d, depth):
             try:
                 st = p.stat()
@@ -236,7 +243,7 @@ def game_files(since: float, game: dict | None, home: Path | None = None) -> lis
                 continue
             if p.suffix.lower() not in LOG_SUFFIXES or st.st_mtime < since - 5 or p.resolve() in seen:
                 continue
-            if d == home and not p.name.startswith("steam-"):
+            if d == home and not p.name.startswith("steam-") or d in shallow and p.suffix.lower() != ".log":
                 continue
             seen.add(p.resolve())
             found.append(p)
@@ -274,11 +281,14 @@ SIGNS: tuple[tuple[str, re.Pattern, str, str, str | None], ...] = (
      "Linux ran out of memory and killed the game",
      "The kernel's out-of-memory killer stopped it. Close other programs, add swap or zram, or lower the game's "
      "graphics settings.", None),
-    ("address_space", re.compile(r"E_OUTOFMEMORY|VK_ERROR_OUT_OF_(HOST|DEVICE)_MEMORY|out of (virtual )?memory|"
-                                 r"Failed to allocate|virtual_alloc.*failed|NtAllocateVirtualMemory.*failed",
+    ("address_space", re.compile(r"Memory allocation for \d+ bytes failed|allocate_virtual_memory out of memory|"
+                                 r"InitTexture: map failed|E_OUTOFMEMORY|VK_ERROR_OUT_OF_(HOST|DEVICE)_MEMORY|"
+                                 r"out of (virtual )?memory|Failed to allocate|NtAllocateVirtualMemory.*failed",
                                  re.IGNORECASE),
-     "The game ran out of memory",
-     "A 32-bit game can address at most 4 GB, and only 2 GB without the large address flag.", "large_address"),
+     "The game ran out of its 4 GB of memory",
+     "ArcheAge Classic is 32-bit, so it can use at most 4 GB however much RAM you have, and DXVK and the "
+     "graphics driver share that space. Lower texture quality (and view distance) in the game's options, and "
+     "turn on the graphics memory fix.", "dxvk_memory"),
     ("device_lost", re.compile(r"VK_ERROR_DEVICE_LOST|Device lost|DXGI_ERROR_DEVICE_(REMOVED|HUNG|RESET)",
                                re.IGNORECASE),
      "The graphics driver crashed (device lost)",
@@ -332,11 +342,7 @@ def analyze(texts: dict[str, str], sampler: Sampler | None, settings: Settings, 
     if peak >= 3.5 * GiB and "address_space" not in keys:
         findings.append(Finding("address_space", "The game was close to the 4 GB limit",
                                 f"It used {peak / GiB:.1f} GB of address space. A 32-bit game crashes at 4 GB.",
-                                True, "large_address"))
-    elif 1.8 * GiB <= peak < 2.2 * GiB and "large_address" not in settings.get("fixes", []):
-        findings.append(Finding("address_space_2g", "The game stopped near 2 GB of memory",
-                                f"It used {peak / GiB:.1f} GB, right at the limit for 32-bit games without the "
-                                "large address flag.", True, "large_address"))
+                                True, "dxvk_memory"))
 
     game = sampler.game if sampler else None
     if game is not None and MARKER not in game.get("env", {}):
@@ -372,7 +378,7 @@ def collect(settings: Settings, sampler: Sampler | None = None, since: float | N
         texts["official-launcher.log"] = _tail_text(launcher_log)
     files = game_files(since, game)
     for p in files:
-        if p.suffix.lower() not in (".dmp", ".mdmp"):
+        if p.suffix.lower() not in DUMPS:
             texts[f"logs/{p.name}"] = _tail_text(p)
     gpus = report._gpus()
     findings = analyze(texts, sampler, settings, gpus, played)
@@ -390,22 +396,72 @@ def collect(settings: Settings, sampler: Sampler | None = None, since: float | N
         "peak_kib": sampler.peak if sampler else {},
         "min_mem_available_kib": sampler.min_mem_available if sampler else None,
         "files": [str(p) for p in files],
+        # Crash dumps hold game memory, which can include the login token, so they stay on disk.
+        "dumps_not_included": [str(p) for p in files if p.suffix.lower() in DUMPS],
     }
     with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as z:
         z.writestr("summary.txt", summarize(findings))
-        z.writestr("details.json", json.dumps(summary, indent=2))
-        z.writestr("report.txt", report.build(settings))
+        z.writestr("details.json", redact(json.dumps(summary, indent=2)))
+        z.writestr("report.txt", redact(report.build(settings)))
         for name, text in texts.items():
-            z.writestr(name, text)
-        for p in files:
-            if p.suffix.lower() in (".dmp", ".mdmp"):
-                try:
-                    if p.stat().st_size <= DUMP_LIMIT:
-                        z.write(p, f"dumps/{p.name}")
-                except OSError:
-                    pass
+            z.writestr(name, redact(text))
     _prune(reports_dir(), keep=10)
+    record(settings, findings, played, zone(texts))
     return out, findings
+
+
+# The official launcher logs the session token in plain text, and the game may get it on
+# its command line. Reports get shared on Discord, so anything token-like is blanked.
+SECRET_RE = re.compile(r"(?i)((?:token|ticket|session[_-]?(?:id|key)?|auth\w*|passw(?:or)?d|secret|api[_-]?key|sfcl)"
+                       r"[\"']?\s*[:=]\s*[\"']?)[^\s\"'&,;]+")
+LONG_RE = re.compile(r"\beyJ[\w-]+\.[\w-]+\.[\w-]+|(?<![\w/.-])[A-Za-z0-9+_-]{32,}={0,2}(?![\w/.-])")
+
+
+def redact(text: str) -> str:
+    return LONG_RE.sub("[hidden]", SECRET_RE.sub(r"\1[hidden]", text))
+
+
+ZONE_RE = re.compile(r"LOADING: '([^']+)'")
+
+
+def zone(texts: dict[str, str]) -> str | None:
+    """The last zone the game loaded, from its log."""
+    found = [m.group(1) for name, text in texts.items() if name.startswith("logs/") for m in ZONE_RE.finditer(text)]
+    return found[-1] if found else None
+
+
+def history_path() -> Path:
+    return state_dir() / "crash-history.jsonl"
+
+
+def record(settings: Settings, findings: list[Finding], played: float | None, last_zone: str | None) -> None:
+    """One line per session, so we can tell whether a fix made crashes rarer."""
+    entry = {
+        "time": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "minutes": round(played / 60, 1) if played is not None else None,
+        "crashed": crashed(findings),
+        "causes": [f.key for f in findings if f.crash],
+        "zone": last_zone,
+        "fixes": settings.get("fixes", []),
+    }
+    path = history_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "a") as f:
+        f.write(json.dumps(entry) + "\n")
+
+
+def history(limit: int = 20) -> list[dict]:
+    try:
+        lines = history_path().read_text().splitlines()
+    except OSError:
+        return []
+    out = []
+    for line in lines[-limit:]:
+        try:
+            out.append(json.loads(line))
+        except ValueError:
+            continue
+    return out
 
 
 def _prune(directory: Path, keep: int) -> None:
