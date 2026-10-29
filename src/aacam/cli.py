@@ -95,6 +95,17 @@ def cmd_info(args, settings):
 def cmd_install(args, settings):
     guard_not_running(args)
     mgr = manager(settings)
+    if args.repo:
+        if args.names:
+            raise CliError("give either addon names or --repo, not both")
+        try:
+            addon, release = mgr.add_repo(args.repo, args.as_, args.branch)
+        except NotFound as e:
+            raise CliError(f"not a GitHub repo: {e.args[0]}") from None
+        print(f"Installed {addon.name} {release.version} from {addon.repo}")
+        return
+    if not args.names:
+        raise CliError("name an addon to install, or use --repo owner/repo")
     reg = Registry.load()
     for name in args.names:
         try:
@@ -123,7 +134,7 @@ def cmd_update(args, settings):
         if args.check:
             print(f"{name}: {mgr.db.addons[name]['version']} -> {release.version}")
             continue
-        mgr.install_one(reg.get(name), release)
+        mgr.install_one(mgr.addon_for(reg, name), release)
         print(f"Updated {name} to {release.version}")
     if not args.check:
         print(f"{len(pending)} updated")
@@ -203,7 +214,10 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("text", nargs="?", default="")
     sp.add_argument("--refresh", action="store_true")
     add("info", cmd_info, "show details for one addon").add_argument("name")
-    add("install", cmd_install, "install addons and their dependencies", names="+", force=True)
+    sp = add("install", cmd_install, "install addons and their dependencies", names="*", force=True)
+    sp.add_argument("--repo", metavar="OWNER/REPO", help="install from a GitHub repo that isn't in the catalogue")
+    sp.add_argument("--as", dest="as_", metavar="NAME", help="folder name for --repo (default: from the repo name)")
+    sp.add_argument("--branch", default="main", help="branch to use for --repo when it has no releases")
     sp = add("update", cmd_update, "update installed addons", names="*", force=True)
     sp.add_argument("--check", action="store_true", help="only list available updates")
     add("enable", cmd_enable, "add addons to addons.txt", names="+", force=True)

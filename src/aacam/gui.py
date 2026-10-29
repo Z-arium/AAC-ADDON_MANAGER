@@ -373,7 +373,7 @@ class MainWindow(QMainWindow):
         def work() -> list[str]:
             done = []
             for name in names:
-                addon = reg.get(name)
+                addon = mgr.addon_for(reg, name)
                 if addon and name in pending:
                     mgr.install_one(addon, pending[name])
                     done.append(name)

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import tempfile
 import time
 from dataclasses import dataclass
@@ -14,6 +15,16 @@ from .registry import Addon, Registry
 
 class NotFound(LookupError):
     pass
+
+
+REPO_RE = re.compile(r"[A-Za-z0-9-]+/[A-Za-z0-9._-]+")
+
+
+def repo_folder_name(repo: str) -> str:
+    """Default addon folder for a repo: Z-arium/aac-dps-meter -> dps_meter."""
+    name = repo.split("/")[1]
+    name = re.sub(r"^(aac|archeage)[-_]", "", name, flags=re.IGNORECASE)
+    return re.sub(r"[-.]", "_", name)
 
 
 @dataclass
@@ -56,19 +67,22 @@ class Manager:
         enabled = set(installer.read_enabled(self.install))
         return sorted(enabled - set(installer.local_addons(self.install)) - installer.IGNORED)
 
-    def install_one(self, addon: Addon, release: github.Release | None = None) -> github.Release:
+    def install_one(self, addon: Addon, release: github.Release | None = None, from_repo: bool = False) -> github.Release:
         release = release or github.latest_release(addon.repo, addon.branch)
         with tempfile.TemporaryDirectory() as tmp:
             archive = github.download(release.zip_url, Path(tmp) / f"{addon.name}.zip")
             installer.install_zip(self.install, addon.name, archive)
         installer.restore_kept_data(self.install, addon.name)
         installer.enable(self.install, addon.name)
-        self.db.addons[addon.name] = {
+        rec = {
             "version": release.version,
             "repo": addon.repo,
             "commit": release.commit,
             "installed_at": int(time.time()),
         }
+        if from_repo or self.db.addons.get(addon.name, {}).get("source") == "repo":
+            rec.update(source="repo", branch=addon.branch)
+        self.db.addons[addon.name] = rec
         self.db.save()
         return release
 
@@ -86,11 +100,26 @@ class Manager:
             done.append((addon, self.install_one(addon)))
         return done
 
+    def add_repo(self, repo: str, name: str | None = None, branch: str = "main") -> tuple[Addon, github.Release]:
+        """Install an addon straight from a GitHub repo that isn't in the catalogue."""
+        if not REPO_RE.fullmatch(repo):
+            raise NotFound(f"{repo} (expected owner/repo)")
+        name = name or repo_folder_name(repo)
+        addon = Addon(name, name, "", repo.split("/")[0], repo, branch)
+        return addon, self.install_one(addon, from_repo=True)
+
+    def addon_for(self, reg: Registry, name: str) -> Addon | None:
+        """Catalogue entry for an installed addon, or its repo if it was installed with --repo."""
+        rec = self.db.addons.get(name) or {}
+        if rec.get("source") == "repo":
+            return Addon(name, name, "", rec["repo"].split("/")[0], rec["repo"], rec.get("branch") or "main")
+        return reg.get(name)
+
     def check_updates(self, reg: Registry, names: list[str] | None = None) -> dict[str, github.Release]:
         """Managed addons whose latest release differs from the installed one."""
         out = {}
         for name in names or sorted(self.db.addons):
-            addon = reg.get(name)
+            addon = self.addon_for(reg, name)
             if addon is None or name not in self.db.addons:
                 continue
             release = github.latest_release(addon.repo, addon.branch)
