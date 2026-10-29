@@ -1,16 +1,14 @@
-# AAC Addon Manager: ArcheAge Classic addons on Linux
+# ArcheAge Classic Linux Launcher
 
-A free desktop app and command-line tool that installs, updates, enables and removes ArcheAge Classic addons when the game runs under the official launcher, Wine, Proton (Steam), Lutris, Bottles or Heroic.
-
-See [ROADMAP.md](ROADMAP.md) for what is planned on the way to 1.0.
+A free app that gets ArcheAge Classic running on Linux and keeps your addons up to date. The official launcher still handles login and patching; this one handles the tweaks and hurdles around it. Today it installs, updates, enables and removes addons when the game runs under the official launcher, Wine, Proton (Steam), Lutris, Bottles or Heroic, and starts the game; game setup and crash fixes are next on the [roadmap](ROADMAP.md).
 
 ## Desktop app
 
-Download `AAC-Addon-Manager-x86_64.AppImage` from the [Releases page](https://github.com/Z-arium/AAC-ADDON_MANAGER/releases), then:
+Download `ArcheAge-Classic-Linux-Launcher-x86_64.AppImage` from the [Releases page](https://github.com/Z-arium/AAC-ADDON_MANAGER/releases), then:
 
 ```bash
-chmod +x AAC-Addon-Manager-x86_64.AppImage
-./AAC-Addon-Manager-x86_64.AppImage
+chmod +x ArcheAge-Classic-Linux-Launcher-x86_64.AppImage
+./ArcheAge-Classic-Linux-Launcher-x86_64.AppImage
 ```
 
 - **My Addons**: everything in your addon folder, a checkbox to turn each one on or off in game, its version, and Update or Remove buttons.
@@ -19,7 +17,7 @@ chmod +x AAC-Addon-Manager-x86_64.AppImage
 - **Play** starts the game. The first time, it asks for the launch command (it suggests the official launcher if it finds it).
 - The app tells you in the status bar when a newer version of itself is out.
 
-Running from source instead: `./install.sh` installs both the app (menu entry "AAC Addon Manager") and the `aacam` command.
+Running from source instead: `./install.sh` installs both the app (menu entry "ArcheAge Classic Linux Launcher") and the `aacam` command.
 
 ## Command line
 

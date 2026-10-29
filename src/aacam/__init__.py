@@ -1,3 +1,3 @@
-"""ArcheAge Classic addon manager for Linux."""
+"""ArcheAge Classic Linux Launcher: gets the game running on Linux and manages addons."""
 
 __version__ = "0.1.0"

@@ -1,6 +1,6 @@
 # Roadmap to 1.0
 
-AAC Addon Manager is a free, WowUp-style addon manager for ArcheAge Classic, growing into a Linux-first launcher for the game. It will always be free: no paid tier, no ads, no paywalled features.
+ArcheAge Classic Linux Launcher gets ArcheAge Classic running on Linux and keeps your addons up to date. The official launcher still handles login and patching; ours handles the tweaks and hurdles around it, plus WowUp-style addon management. It will always be free: no paid tier, no ads, no paywalled features.
 
 The order is deliberate. First make installing and updating addons on your own machine boringly reliable, then make it pleasant, then make it easy to get, then grow it into a full Linux launcher that wraps the official one. 1.0 is that launcher, with addons built in. Uploading addons and a store come after that.
 
@@ -42,7 +42,7 @@ Goal: it feels like WowUp, not a table.
 Goal: installing the manager is one step on any common Linux setup, and it updates itself.
 
 - Self-update for the AppImage (AppImageUpdate zsync info, or download-and-replace from GitHub releases).
-- AUR package (`aac-addon-manager-bin`) for Arch and CachyOS users.
+- AUR package (`archeage-classic-linux-launcher-bin`) for Arch and CachyOS users.
 - Flatpak on Flathub, with filesystem access to Wine and Steam prefixes.
 - Signed release checksums.
 

@@ -1,5 +1,5 @@
 #!/bin/sh
-# Install aacam (command line) and the AAC Addon Manager desktop app into
+# Install aacam (command line) and the ArcheAge Classic Linux Launcher desktop app into
 # their own virtualenv, link them into ~/.local/bin and add a menu entry.
 # Needs only python3; works without pipx. Run again to upgrade.
 # Pass --no-gui to skip the desktop app (and its ~100 MB Qt download).
@@ -28,11 +28,12 @@ echo "Installed aacam to $bindir/aacam"
 if [ "$gui" = 1 ]; then
   ln -sf "$venv/bin/aacam-gui" "$bindir/aacam-gui"
   mkdir -p "$data/applications" "$data/icons/hicolor/256x256/apps"
-  cp "$here/src/aacam/icon.png" "$data/icons/hicolor/256x256/apps/aac-addon-manager.png"
-  sed "s|^Exec=.*|Exec=$bindir/aacam-gui|" "$here/packaging/aac-addon-manager.desktop" \
-    > "$data/applications/aac-addon-manager.desktop"
+  cp "$here/src/aacam/icon.png" "$data/icons/hicolor/256x256/apps/aac-linux-launcher.png"
+  rm -f "$data/applications/aac-addon-manager.desktop" "$data/icons/hicolor/256x256/apps/aac-addon-manager.png"  # old name
+  sed "s|^Exec=.*|Exec=$bindir/aacam-gui|" "$here/packaging/aac-linux-launcher.desktop" \
+    > "$data/applications/aac-linux-launcher.desktop"
   command -v update-desktop-database >/dev/null && update-desktop-database "$data/applications" 2>/dev/null || true
-  echo "Installed the desktop app: find \"AAC Addon Manager\" in your app menu, or run aacam-gui"
+  echo "Installed the desktop app: find \"ArcheAge Classic Linux Launcher\" in your app menu, or run aacam-gui"
 fi
 
 case ":$PATH:" in

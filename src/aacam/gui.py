@@ -38,7 +38,7 @@ from .config import Settings
 from .core import Manager
 from .registry import Addon, Registry
 
-APP_NAME = "AAC Addon Manager"
+APP_NAME = "ArcheAge Classic Linux Launcher"
 APP_REPO = "Z-arium/AAC-ADDON_MANAGER"
 
 
@@ -429,7 +429,7 @@ def main(argv: list[str] | None = None) -> int:
     app = QApplication(argv if argv is not None else sys.argv)
     app.setApplicationName(APP_NAME)
     app.setApplicationVersion(__version__)
-    app.setDesktopFileName("aac-addon-manager")
+    app.setDesktopFileName("aac-linux-launcher")
     icon = Path(__file__).with_name("icon.png")
     if icon.exists():
         app.setWindowIcon(QIcon(str(icon)))

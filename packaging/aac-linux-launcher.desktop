@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=ArcheAge Classic Linux Launcher
+Comment=Get ArcheAge Classic running on Linux and keep your addons up to date
+Exec=aacam-gui
+Icon=aac-linux-launcher
+Categories=Game;Utility;
+Keywords=ArcheAge;launcher;addons;Wine;Proton;
+Terminal=false
