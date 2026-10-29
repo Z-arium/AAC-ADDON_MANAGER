@@ -113,8 +113,11 @@ class AnalyzeTests(TempHome):
         self.assertNotIn("address_space", f)
 
     def test_memory_peak(self):
-        s = crash.Sampler(peak={"VmPeak": int(3.8 * GiB)})
-        self.assertIn("address_space", self.keys({}, s))
+        s = crash.Sampler(peak={"VmPeak": 3_920_100})  # a session that crashed
+        f = self.keys({}, s)["address_space_close"]
+        self.assertFalse(f.crash)  # a hint; a clean close near the limit is not a crash
+        self.assertNotIn("address_space_close", self.keys({}, crash.Sampler(peak={"VmPeak": 3_660_000})))
+        self.assertNotIn("address_space_close", self.keys({}, crash.Sampler(peak={"VmPeak": 9 * GiB})))  # WoW64
         self.assertNotIn("address_space", self.keys({}, crash.Sampler(peak={"VmPeak": 2 * GiB})))
 
     def test_hybrid_gpu_and_env_blocked(self):
@@ -122,6 +125,8 @@ class AnalyzeTests(TempHome):
         picked = crash.Sampler(game={"pid": 1, "env": {"DXVK_FILTER_DEVICE_NAME": "RTX 4070", crash.MARKER: "1"}})
         gpus4070 = ["Intel Corporation Raptor Lake-P", "NVIDIA Corporation AD106M [GeForce RTX 4070 Max-Q]"]
         self.assertNotIn("hybrid_gpu", self.keys({}, picked, gpus=gpus4070))
+        launcher_set = {"logs/wine-last.log": "DXVK_FILTER_DEVICE_NAME=RTX 4070"}
+        self.assertNotIn("hybrid_gpu", self.keys(launcher_set, s, gpus=gpus4070))
         f = self.keys({}, s, gpus=["Intel Corporation Raptor Lake-S UHD Graphics", "NVIDIA Corporation AD104 [GeForce RTX 4070]"])
         self.assertEqual(f["hybrid_gpu"].fix, "nvidia_gpu")
         self.assertFalse(f["hybrid_gpu"].crash)
@@ -254,3 +259,44 @@ class WineTests(TempHome):
         game = {"pid": 1, "exe": "/home/x/Proton 11.0/files/bin/wine-preloader", "env": {crash.MARKER: "1"}}
         found = crash.analyze({}, crash.Sampler(game=game), Settings(), [], played=60)
         self.assertIn("proton_anticheat", {f.key for f in found})
+
+
+class MemoryWarningTests(TempHome):
+    def test_near_limit(self):
+        s = crash.Sampler()
+        self.assertFalse(s.near_limit())
+        s.last = {"VmSize": 3_630_000}  # a long, stable session
+        self.assertFalse(s.near_limit())
+        s.last = {"VmSize": 3_870_052}  # two minutes before a crash
+        self.assertTrue(s.near_limit())
+        s.last = {"VmSize": 12 * GiB}  # a 64-bit WoW64 process: meaningless
+        self.assertFalse(s.near_limit())
+
+
+class Wow64Tests(TempHome):
+    def test_wow64_waits_for_the_teams_ok(self):
+        from aacam import wine
+        w = fake_wine(self.home, "wine-11.0-staging-amd64-wow64", wow64=True)
+        classic = fake_wine(self.home, "wine-11.0-staging-amd64")
+        prefix = wine.default_prefix(self.home)
+        prefix.mkdir(parents=True)
+        (prefix / "system.reg").write_text("")
+        self.assertEqual(wine.choose(str(w), self.home), classic)  # a saved WoW64 choice falls back
+        with mock.patch.object(wine, "WOW64_CLEARED", True):
+            self.assertEqual(wine.choose(str(w), self.home), w)
+
+    def test_download_checks_checksum_and_unpacks(self):
+        import hashlib, tarfile
+        from aacam import wine
+        src = self.home / "src" / wine.WOW64_NAME / "bin"
+        src.mkdir(parents=True)
+        (src / "wine").write_text("#!/bin/sh\n")
+        (src / "wine").chmod(0o755)
+        archive = self.home / "w.tar.xz"
+        with tarfile.open(archive, "w:xz") as tar:
+            tar.add(self.home / "src" / wine.WOW64_NAME, arcname=wine.WOW64_NAME)
+        digest = hashlib.sha256(archive.read_bytes()).hexdigest()
+        with self.assertRaises(wine.WineError):
+            wine.download_wow64(self.home / "bad", url=archive.as_uri(), sha256="0" * 64)
+        build = wine.download_wow64(self.home / "dest", url=archive.as_uri(), sha256=digest)
+        self.assertTrue(os.access(build / "bin/wine", os.X_OK))

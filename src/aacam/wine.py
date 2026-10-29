@@ -8,13 +8,39 @@ Wine-Staging build and the launcher's own wine-staging-pfx prefix when one is in
 
 from __future__ import annotations
 
+import hashlib
 import os
+import shutil
+import tarfile
+import tempfile
+import urllib.error
+import urllib.request
 from pathlib import Path
+
+from . import __version__
+from .config import data_dir
 
 LAUNCHER = "launcher"  # setting value: let the official launcher choose
 # The launcher prefers Proton when any of these is set.
 PROTON_VARS = ("AAC_PROTON", "AAC_STEAM_PATH", "AAC_STEAM_COMPAT_APP_ID", "AAC_STEAM_COMPAT_DATA_PATH",
                "STEAM_COMPAT_DATA_PATH", "STEAM_COMPAT_CLIENT_INSTALL_PATH")
+
+
+# A WoW64 build runs the 32-bit game without 32-bit Linux libraries: Wine's Unix side and the graphics
+# driver live in 64-bit memory, leaving the game more of its 4 GB. Per the ground rule in ROADMAP.md it
+# stays switched off until the ArcheAge Classic team confirms it is allowed.
+WOW64_CLEARED = False
+WOW64_NAME = "wine-11.0-staging-amd64-wow64"
+WOW64_URL = f"https://github.com/Kron4ek/Wine-Builds/releases/download/11.0/{WOW64_NAME}.tar.xz"
+WOW64_SHA256 = "e6538a417dd2e7f738ad77addf74bfd9e45c9d970653674f93bde2df29055f2f"  # from the release's sha256sums.txt
+
+
+class WineError(RuntimeError):
+    pass
+
+
+def own_dir() -> Path:
+    return data_dir() / "wine"
 
 
 def runner_dirs(home: Path) -> list[Path]:
@@ -50,6 +76,10 @@ def label(build: Path) -> str:
     return f"{build.name}{' (WoW64)' if is_wow64(build) else ''}"
 
 
+def allowed(build: Path) -> bool:
+    return WOW64_CLEARED or not is_wow64(build)
+
+
 def default_prefix(home: Path | None = None) -> Path:
     return (home or Path.home()) / ".local/share/AAClassic/wine-staging-pfx"
 
@@ -61,10 +91,11 @@ def choose(setting: str | None, home: Path | None = None) -> Path | None:
         return None
     if setting:
         build = Path(setting)
-        return build if os.access(build / "bin/wine", os.X_OK) else None
+        if os.access(build / "bin/wine", os.X_OK) and allowed(build):
+            return build
     if not (default_prefix(home) / "system.reg").is_file():
         return None
-    found = builds(home)
+    found = [b for b in builds(home) if allowed(b)]
     staging = [b for b in found if "staging" in b.name.lower()]
     return (staging or found or [None])[0]
 
@@ -79,3 +110,42 @@ def env(build: Path, prefix: Path, path: str | None = None) -> dict[str, str | N
     }
     values.update({name: None for name in PROTON_VARS})
     return values
+
+
+def download_wow64(dest: Path | None = None, url: str = WOW64_URL, sha256: str = WOW64_SHA256) -> Path:
+    """Download and unpack the WoW64 Wine-Staging build, checking its published checksum."""
+    dest = dest or own_dir()
+    build = dest / WOW64_NAME
+    if os.access(build / "bin/wine", os.X_OK):
+        return build
+    dest.mkdir(parents=True, exist_ok=True)
+    req = urllib.request.Request(url, headers={"User-Agent": f"aacam/{__version__}"})
+    with tempfile.TemporaryDirectory(dir=dest) as tmp:
+        archive = Path(tmp) / "wine.tar.xz"
+        digest = hashlib.sha256()
+        try:
+            with urllib.request.urlopen(req, timeout=300) as resp, open(archive, "wb") as out:
+                while chunk := resp.read(1 << 20):
+                    digest.update(chunk)
+                    out.write(chunk)
+        except (urllib.error.URLError, OSError) as e:
+            raise WineError(f"could not download {url}: {e}") from e
+        if digest.hexdigest() != sha256:
+            raise WineError(f"{url} does not match its published checksum; not using it")
+        unpacked = Path(tmp) / "out"
+        with tarfile.open(archive) as tar:
+            for member in tar.getmembers():
+                target = (unpacked / member.name).resolve()
+                if not str(target).startswith(str(unpacked.resolve())) or member.isdev():
+                    raise WineError(f"unsafe path in {url}: {member.name}")
+            if hasattr(tarfile, "data_filter"):
+                tar.extractall(unpacked, filter="data")
+            else:
+                tar.extractall(unpacked)
+        top = unpacked / WOW64_NAME
+        if not os.access(top / "bin/wine", os.X_OK):
+            raise WineError(f"{url} has no {WOW64_NAME}/bin/wine")
+        if build.exists():
+            shutil.rmtree(build)
+        top.rename(build)
+    return build

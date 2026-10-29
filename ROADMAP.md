@@ -58,7 +58,15 @@ In v0.2.1:
 
 Next, once crash reports from real players show what else is needed:
 
-- Download a recommended Wine build (a WoW64 build moves the graphics driver out of the game's 4 GB), once the ArcheAge Classic team confirms it is allowed, and repair the game's prefix.
+In v0.2.2:
+
+- A desktop notification when the game nears its 4 GB limit (above 3.85 million kB; stable sessions sit at 3.6, crashing ones at 3.87 or more).
+- A WoW64 Wine-Staging build (Wine's Unix side and the graphics driver move out of the game's 4 GB) that downloads with its checksum checked, but stays switched off until the ArcheAge Classic team confirms it is allowed, like the DXVK memory setting.
+- Recommended graphics profile for players hitting the limit, set in the game's own options: character textures 4, background textures 3, terrain detail 3, shader quality 4, HDR on, shadows and water reflections off.
+
+Next:
+
+- Switch on the DXVK memory setting and WoW64 Wine once the ArcheAge Classic team OKs them, and repair the game's prefix.
 - A Steam Deck check on real hardware.
 - Never touch the game's own files, the login, or anything the official launcher signs or patches.
 
