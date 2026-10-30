@@ -6,6 +6,8 @@ A free app that gets ArcheAge Classic running on Linux and keeps your addons up 
 
 ## Desktop app
 
+![The launcher's Play screen](docs/screenshot.png)
+
 Download `ArcheAge-Classic-Linux-Launcher-x86_64.AppImage` from the [Releases page](https://github.com/Z-arium/AAC-ADDON_MANAGER/releases), then:
 
 ```bash
@@ -18,6 +20,8 @@ The first time it opens, **Setup** walks you through three things:
 1. **Your system**: FUSE 2, Vulkan, a Vulkan driver, and the 32-bit Vulkan and OpenGL libraries the 32-bit game needs, with copyable fix commands for Arch/CachyOS, SteamOS, Debian/Ubuntu/Mint, Fedora and openSUSE.
 2. **The official launcher**: found where it usually lives, or downloaded from aa-classic.com.
 3. **Your addon folder**: found automatically once the game has run, or chosen by you.
+
+The window opens on **Play**, with a sidebar for My Addons, Get Addons, Crash fixes and Setup.
 
 - **Play** updates your addons, then starts the official launcher, where you log in and press Play. While the game runs the app keeps an eye on its memory use, and shows a desktop notification when the 32-bit game gets close to its 4 GB limit, before it crashes. When it closes, the app checks the logs and the kernel for signs of a crash (out of memory, unhandled exceptions, GPU errors, a very short session). If it finds one, it explains it, saves the logs to a crash report zip, and suggests the fix that matches.
 - **Wine build**: the official launcher runs the game with Wine or Proton. Under Proton the game's anti-cheat closes it right after server select, so when the official launcher's Wine-Staging prefix exists, Play points it at a Wine-Staging build from Heroic or Lutris (`AAC_WINE`, `AAC_WINEPREFIX`). You can pick another build or let the official launcher choose. A WoW64 build would leave the game more of its 4 GB. Until the ArcheAge Classic team confirms it is allowed it is off by default, but you can test it on your own PC at your own risk (`aacam wine --test-wow64`, or the checkbox in Crash fixes). That downloads it, copies your Wine prefix so the original stays untouched, and `aacam wine --stop-wow64` goes back.
