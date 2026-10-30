@@ -41,3 +41,12 @@ def context() -> ssl.SSLContext:
 
 def urlopen(req, timeout: float):
     return urllib.request.urlopen(req, timeout=timeout, context=context())
+
+
+def check(url: str = "https://api.github.com/rate_limit", timeout: float = 15) -> str | None:
+    """None if HTTPS to GitHub works, else why not."""
+    try:
+        with urlopen(urllib.request.Request(url, headers={"User-Agent": "aacam"}), timeout=timeout):
+            return None
+    except Exception as e:  # report any failure, this is a diagnostic
+        return str(getattr(e, "reason", e))

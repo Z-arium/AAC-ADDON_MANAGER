@@ -10,7 +10,7 @@ import textwrap
 import time
 from pathlib import Path
 
-from . import __version__, crash, github, installer, official, paths, report, syscheck, wine
+from . import __version__, crash, github, installer, net, official, paths, report, syscheck, wine
 from .config import Settings
 from .core import Manager, NotFound
 from .registry import Registry
@@ -234,6 +234,11 @@ def cmd_doctor(args, settings):
         print(f"[{report.MARK[c.status]}] {c.title}: {c.detail}")
     launcher = official.locate(settings)
     print(f"[{'ok  ' if launcher else 'FAIL'}] Official launcher: {launcher or 'not found, run `aacam launcher --download`'}")
+    if args.network:
+        problem = net.check()
+        print(f"[{'ok  ' if problem is None else 'FAIL'}] HTTPS to GitHub: {problem or 'works'}")
+        if problem is not None and args.strict:
+            raise CliError(f"HTTPS to GitHub failed: {problem}")
     fixes = syscheck.fix_script(checks)
     if fixes:
         print("\nTo fix, run:\n")
@@ -363,7 +368,9 @@ def build_parser() -> argparse.ArgumentParser:
     sp = add("import", cmd_import, "install an addon from a local zip", force=True)
     sp.add_argument("zip")
     sp.add_argument("--name", help="folder name (default: zip file name)")
-    add("doctor", cmd_doctor, "check this system for what the game needs, and how to fix it")
+    sp = add("doctor", cmd_doctor, "check this system for what the game needs, and how to fix it")
+    sp.add_argument("--network", action="store_true", help="also check that HTTPS to GitHub works")
+    sp.add_argument("--strict", action="store_true", help="exit with an error if the network check fails")
     sp = add("launcher", cmd_launcher, "show, set or download the official ArcheAge Classic launcher")
     sp.add_argument("--set", metavar="APPIMAGE", help="use this launcher AppImage")
     sp.add_argument("--download", action="store_true", help="download it from aa-classic.com")
