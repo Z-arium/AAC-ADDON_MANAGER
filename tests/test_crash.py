@@ -271,6 +271,23 @@ class MemoryWarningTests(TempHome):
         self.assertTrue(s.near_limit())
         s.last = {"VmSize": 12 * GiB}  # a 64-bit WoW64 process: meaningless
         self.assertFalse(s.near_limit())
+        s.last = {"VmSize": 12 * GiB, "Space32": 3_900_000}  # WoW64, measured below 4 GB
+        self.assertTrue(s.near_limit())
+        self.assertEqual(s.used_kib(), 3_900_000)
+
+    def test_space_below_4gb_from_maps(self):
+        maps = self.home / "proc/7/maps"
+        maps.parent.mkdir(parents=True)
+        maps.write_text(
+            "00010000-00110000 r-xp 00000000 00:00 0  /game/bin32/archeage.exe\n"   # 1 MiB
+            "ffe00000-100100000 rw-p 00000000 00:00 0\n"                             # 2 of 3 MiB below 4 GB
+            "7f0000000000-7f0040000000 rw-p 00000000 00:00 0  /usr/lib/libnvidia.so\n"  # 64-bit side
+        )
+        self.assertEqual(crash.space_32bit_kib(7, self.home / "proc"), 3 * 1024)
+        self.assertIsNone(crash.space_32bit_kib(8, self.home / "proc"))
+
+    def test_meter(self):
+        self.assertEqual(crash.meter(3_619_000), "3.62 of 3.85 GB before a likely crash (94%)")
 
 
 class Wow64Tests(TempHome):
