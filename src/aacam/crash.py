@@ -119,6 +119,7 @@ def set_fix(settings: Settings, key: str, on: bool) -> None:
 ENV_RE = re.compile(r"^(WINE\w*|PROTON\w*|DXVK\w*|VKD3D\w*|STEAM_COMPAT\w*|__NV\w*|__GL\w*|__VK\w*|"
                     r"MESA\w*|VK_\w+|LD_PRELOAD|SDL_VIDEODRIVER|" + MARKER + ")$")
 STATUS_KEYS = ("VmPeak", "VmSize", "VmHWM", "VmRSS", "VmSwap", "Threads")
+SAMPLE_KEYS = (*STATUS_KEYS, "Space32")
 
 
 def _kib(value: str) -> int:
@@ -148,7 +149,27 @@ def snapshot(pid: int, proc: Path = Path("/proc")) -> dict | None:
                        if ENV_RE.match(k)}
     except OSError:
         pass
+    space = space_32bit_kib(pid, proc)
+    if space is not None:
+        snap["Space32"] = space
     return snap
+
+
+def space_32bit_kib(pid: int, proc: Path = Path("/proc")) -> int | None:
+    """How much of the game's 4 GB address space is taken, from the address ranges in /proc/PID/maps
+    (never the memory itself). Unlike VmSize this also works under a WoW64 Wine, whose 64-bit side
+    lives above 4 GB."""
+    total = 0
+    try:
+        with open(proc / str(pid) / "maps") as maps:
+            for line in maps:
+                start, _, end = line.partition(" ")[0].partition("-")
+                lo, hi = int(start, 16), min(int(end, 16), LIMIT_KIB * 1024)
+                if lo < hi:
+                    total += hi - lo
+    except (OSError, ValueError):
+        return None
+    return total // 1024
 
 
 def mem_available_kib(meminfo: Path = Path("/proc/meminfo")) -> int | None:
@@ -180,9 +201,9 @@ class Sampler:
         if snap is None:
             return
         self.samples += 1
-        self.last = {k: snap[k] for k in STATUS_KEYS if k in snap}
-        self.game = {k: v for k, v in snap.items() if k not in STATUS_KEYS} | {"pid": snap["pid"]}
-        for key in ("VmPeak", "VmSize", "VmHWM", "VmRSS", "VmSwap", "Threads"):
+        self.last = {k: snap[k] for k in SAMPLE_KEYS if k in snap}
+        self.game = {k: v for k, v in snap.items() if k not in SAMPLE_KEYS} | {"pid": snap["pid"]}
+        for key in SAMPLE_KEYS:
             if key in snap:
                 self.peak[key] = max(self.peak.get(key, 0), snap[key])
         avail = mem_available_kib()
@@ -190,20 +211,33 @@ class Sampler:
             self.min_mem_available = avail if self.min_mem_available is None else min(self.min_mem_available, avail)
 
 
+    def used_kib(self) -> int | None:
+        """The part of the game's 4 GB in use, or None when we cannot tell."""
+        if "Space32" in self.last:
+            return self.last["Space32"]
+        vmsize = self.last.get("VmSize")
+        return vmsize if vmsize is not None and vmsize <= LIMIT_KIB else None
+
     def near_limit(self) -> bool:
-        """True when a 32-bit game is about to run out of its 4 GB of address space."""
-        return near_limit(self.last.get("VmSize", 0))
+        """True when the 32-bit game is about to run out of its 4 GB of address space."""
+        return near_limit(self.used_kib() or 0)
 
 
 # Measured on ArcheAge Classic: sessions that ran for hours stayed at 3.6-3.8 million kB (3.8 while a zone
 # loads); ones that crashed sat at 3.87-3.92 million kB. Allocations fail before 4 GiB because the space
-# fragments. Above 4 GiB the process is 64-bit (a WoW64 Wine), where the figure means nothing.
+# fragments. Under a WoW64 Wine VmSize also counts the 64-bit side, so we measure the space below 4 GB.
 WARN_KIB = 3_850_000
+CAUTION_KIB = 3_700_000  # the meter turns amber here
 LIMIT_KIB = 4 * 1024 * 1024
 
 
-def near_limit(vmsize_kib: int) -> bool:
-    return WARN_KIB <= vmsize_kib <= LIMIT_KIB
+def near_limit(used_kib: int) -> bool:
+    return WARN_KIB <= used_kib <= LIMIT_KIB
+
+
+def meter(used_kib: int) -> str:
+    """One line for a live readout, e.g. "3.62 of 3.85 GB before a likely crash (94%)"."""
+    return f"{used_kib / 1e6:.2f} of {WARN_KIB / 1e6:.2f} GB before a likely crash ({used_kib * 100 // WARN_KIB}%)"
 
 
 # --- after the game exits -----------------------------------------------------
@@ -364,7 +398,7 @@ def analyze(texts: dict[str, str], sampler: Sampler | None, settings: Settings, 
             detail = f"Wine reported: {m.group(0).strip()[:200]}"
         findings.append(Finding(key, title, detail, True, fix))
 
-    peak = sampler.peak.get("VmPeak", 0) if sampler else 0
+    peak = (sampler.peak.get("Space32") or sampler.peak.get("VmPeak", 0)) if sampler else 0
     keys = {f.key for f in findings}
     if near_limit(peak) and "address_space" not in keys:
         findings.append(Finding("address_space_close", "The game came close to its 4 GB limit",

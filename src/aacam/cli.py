@@ -330,6 +330,25 @@ def cmd_crash_report(args, settings):
     print(f"\nSaved {path}\nAttach that file when you ask for help.")
 
 
+def cmd_watch(args, settings):
+    """Print the game's memory use against its 4 GB limit until it closes."""
+    sampler = crash.Sampler()
+    print("Waiting for ArcheAge Classic… (Ctrl+C to stop)")
+    while True:
+        sampler.sample()
+        if sampler.samples and not paths.game_pids():
+            used = sampler.peak.get("Space32") or sampler.peak.get("VmPeak", 0)
+            print(f"The game closed. Peak: {crash.meter(used)}")
+            return
+        used = sampler.used_kib()
+        if used is not None:
+            rss = sampler.last.get("VmRSS", 0) / 1e6
+            warn = "  ** close to the crash line: lower textures or log out somewhere safe **" \
+                if sampler.near_limit() else ""
+            print(f"{time.strftime('%H:%M:%S')}  {crash.meter(used)}  RAM {rss:.2f} GB{warn}", flush=True)
+        time.sleep(args.every)
+
+
 def cmd_report(args, settings):
     print(report.build(settings), end="")
 
@@ -393,6 +412,8 @@ def build_parser() -> argparse.ArgumentParser:
     sp = add("crash-report", cmd_crash_report, "collect evidence after a crash into a zip and name known causes")
     sp.add_argument("--minutes", type=int, default=60, help="how far back to look (default 60)")
     sp.add_argument("--history", action="store_true", help="list recent game sessions: length, crash cause, zone")
+    sp = add("watch", cmd_watch, "show the game's memory use against its 4 GB limit while it runs")
+    sp.add_argument("--every", type=float, default=10, help="seconds between readings (default 10)")
     sp = add("launch", cmd_launch, "start the game through the official launcher")
     sp.add_argument("--set", metavar="COMMAND",
                     help="start the game with this shell command instead (empty to go back to the official launcher)")
