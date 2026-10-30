@@ -4,6 +4,14 @@ ArcheAge Classic Linux Launcher gets ArcheAge Classic running on Linux and keeps
 
 The vision: anyone on any Linux distro downloads the launcher and ArcheAge Classic works out of the box, with addons supported. So getting the game running comes first, then making everything reliable, then addon polish, then making the launcher easy to get and keep updated. 1.0 is that launcher. Uploading addons and a store come after that.
 
+## Arch Linux first
+
+We develop and test for Arch Linux (including CachyOS and other Arch-based distros) first; other distros are supported later (Jacob's call, 2026-10-30). In practice:
+
+- New features are built and checked against Arch's packages and paths first.
+- CI's Arch job, including an HTTPS check from the AppImage, must pass before a release. The Ubuntu, Debian, Fedora, openSUSE and Mint jobs still run, but their failures don't block a release.
+- The AUR package comes before Flatpak and other distro packages.
+
 ## Ground rule: nothing that could get a player banned
 
 This applies to every version and every feature, and it wins over anything else in this roadmap.
@@ -66,6 +74,8 @@ In v0.2.2:
 
 In v0.2.3: a player can opt in to test WoW64 Wine on their own PC before the team's OK, in a copy of their Wine prefix (Jacob's choice, 2026-10-30). It stays off for everyone else.
 
+In v0.2.4: HTTPS works from the AppImage on Arch (it couldn't find Arch's CA certificates, so addon updates and downloads said "could not reach GitHub"); `aacam doctor --network` checks it, and CI runs that on Arch.
+
 Next:
 
 - Switch on the DXVK memory setting and WoW64 Wine once the ArcheAge Classic team OKs them, and repair the game's prefix.
@@ -100,7 +110,7 @@ Goal: addon management feels like WowUp, not a table.
 Goal: installing the manager is one step on any common Linux setup, and it updates itself.
 
 - Self-update for the AppImage (AppImageUpdate zsync info, or download-and-replace from GitHub releases).
-- AUR package (`archeage-classic-linux-launcher-bin`) for Arch and CachyOS users.
+- AUR package (`archeage-classic-linux-launcher-bin`) for Arch and CachyOS users, first of the packages (see Arch Linux first).
 - Flatpak on Flathub, with filesystem access to Wine and Steam prefixes.
 - Signed release checksums.
 

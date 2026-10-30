@@ -15,7 +15,7 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-from . import __version__, paths
+from . import __version__, net, paths
 from .config import state_dir, write_atomic
 
 # Linux AppImage, from https://aa-classic.com/news/launcher-update-220. The
@@ -76,7 +76,7 @@ def download(dest_dir: Path | None = None, version: str = DEFAULT_VERSION) -> Pa
     url = DOWNLOAD_URL.format(version=version)
     req = urllib.request.Request(url, headers={"User-Agent": f"aacam/{__version__}"})
     try:
-        with urllib.request.urlopen(req, timeout=300) as resp:
+        with net.urlopen(req, timeout=300) as resp:
             blob = resp.read()
     except urllib.error.HTTPError as e:
         raise LauncherError(

@@ -58,7 +58,7 @@ aacam remove nuzi-raid        # keeps saved settings; --purge deletes them
 aacam install --repo Z-arium/aac-dps-meter   # straight from a GitHub repo; updates like the rest
 aacam import ~/Downloads/MyAddon.zip   # an addon that isn't in the catalogue
 
-aacam doctor                  # check drivers and libraries, print the fix commands for your distro
+aacam doctor                  # check drivers and libraries, print the fix commands for your distro (--network: HTTPS to GitHub too)
 aacam launcher --download     # download the official launcher (or --set /path/to/it.AppImage)
 aacam launch --update-first   # update addons, then start the official launcher
 aacam report                  # system details and the launcher's log, to paste when asking for help
