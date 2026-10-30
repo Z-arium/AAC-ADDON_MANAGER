@@ -7,7 +7,7 @@ import platform
 import shutil
 import subprocess
 
-from . import __version__, official, paths, syscheck
+from . import __version__, github, logs, official, paths, syscheck
 from .config import Settings
 from .core import Manager
 
@@ -24,7 +24,7 @@ def _gpus() -> list[str]:
     return [line.split(": ", 1)[-1] for line in out.splitlines() if " VGA " in line or "3D controller" in line]
 
 
-def build(settings: Settings | None = None) -> str:
+def build(settings: Settings | None = None, log_lines: int = 80) -> str:
     settings = settings or Settings()
     d = syscheck.distro()
     lines = [
@@ -52,6 +52,12 @@ def build(settings: Settings | None = None) -> str:
         lines.append(f"Addon folder: {mgr.install.addon_dir}")
         enabled = [a.name for a in mgr.local() if a.enabled]
         lines.append(f"Enabled addons ({len(enabled)}): {', '.join(enabled) or 'none'}")
+        versions = [f"{n} {r.get('version')}" for n, r in sorted(mgr.db.addons.items())]
+        lines.append(f"Tracked addons ({len(versions)}): {', '.join(versions) or 'none'}")
+    lines.append(f"GitHub token: {'set' if github.token() else 'none'}")
+    ours = logs.tail(log_lines) if log_lines else ""
+    if ours:
+        lines += ["", f"Last lines of {logs.path()}:", ours]
     tail = official.log_tail(150)
     if tail:
         lines += ["", f"Last lines of {official.log_path()}:", tail]

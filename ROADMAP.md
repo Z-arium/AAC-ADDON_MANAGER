@@ -92,16 +92,18 @@ Next:
 - A Steam Deck check on real hardware.
 - Never touch the game's own files, the login, or anything the official launcher signs or patches.
 
-## v0.3: Reliable on every machine
+In v0.2.9: the launcher looks like a window from ArcheAge itself (parchment, bronze, Alegreya), and the Play tab is a plaque with the state, the four steps and the Play button over your addons, the checks and recent sessions, with no screenshot.
+
+## v0.3: Reliable on every machine (released as v0.3.0)
 
 Goal: nobody hits an error they cannot understand.
 
-- Clear, actionable error messages for GitHub rate limits, network failures and bad zips, in both the app and the CLI.
-- Optional GitHub token in the app's settings (today it is only the `GITHUB_TOKEN` variable), so updating many addons does not hit the 60 calls an hour limit.
-- Cache release lookups and use conditional requests (ETags) so a check for updates costs few API calls.
-- Detect addons that were installed by hand or by another manager and offer to track them for updates.
-- A log file and a "Copy diagnostics" button for bug reports, plus an issue template.
-- Tests for the GUI's core flows and for path detection across the prefix layouts we support.
+- Clear, actionable error messages for GitHub rate limits (with the reset time and a button to add a token), network failures (offline, DNS, timeouts, certificates), bad zips and renamed repos, in both the app and the CLI. One broken addon repo no longer stops the others from updating, and unexpected errors are logged instead of shown as a traceback.
+- Optional GitHub token in Setup and `aacam token`, stored only in `~/.config/aacam/config.json` (readable only by you), never logged or put in reports.
+- Release lookups cached for 5 minutes, then revalidated with ETags, so a check for updates costs few API calls; the last known answer is used when GitHub is unreachable or the limit is used up.
+- Addons installed by hand or by another manager that match the catalogue are found and can be tracked for updates (Track in My Addons, `aacam track`), keeping their folder, settings and `addons.txt` entry.
+- A log file (`~/.local/state/aacam/aacam.log`), "Copy diagnostics", "Open log folder" and "Report a bug" in Setup, and a bug report issue template.
+- Tests for the GUI's core flows (install, track, update, disable, remove, token, rate limit) and for path detection across Bottles, Flatpak Steam, `$WINEPREFIX` and non-English Documents folders, which also fixed detection of `~/Dokumente/AAClassic` and other translated Documents folders. CI runs them on Arch Linux with Arch's own PySide6.
 
 ## v0.4: Addons that feel like WowUp
 

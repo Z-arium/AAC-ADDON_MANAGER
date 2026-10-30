@@ -1,0 +1,35 @@
+name: Bug report
+description: Something in the launcher doesn't work, or the game won't start or crashes
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting. Please never paste a GitHub token, password or login link here.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What you did, what you expected, and what happened instead.
+    validations:
+      required: true
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Diagnostics
+      description: |
+        In the launcher, open Setup and press **Copy diagnostics**, then paste here.
+        From a terminal: `aacam report` (or `./ArcheAge-Classic-Linux-Launcher-x86_64.AppImage cli report`).
+      render: text
+    validations:
+      required: true
+  - type: textarea
+    id: crash
+    attributes:
+      label: Crash report (if the game crashed)
+      description: Attach the zip from Crash fixes > Save a crash report now (or `aacam crash-report`).
+  - type: input
+    id: distro
+    attributes:
+      label: Distro
+      placeholder: e.g. CachyOS, Arch, Fedora 41, Ubuntu 24.04, SteamOS
