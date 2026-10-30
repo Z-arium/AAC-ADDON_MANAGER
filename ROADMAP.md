@@ -64,6 +64,8 @@ In v0.2.2:
 - A WoW64 Wine-Staging build (Wine's Unix side and the graphics driver move out of the game's 4 GB) that downloads with its checksum checked, but stays switched off until the ArcheAge Classic team confirms it is allowed, like the DXVK memory setting.
 - Recommended graphics profile for players hitting the limit, set in the game's own options: character textures 4, background textures 3, terrain detail 3, shader quality 4, HDR on, shadows and water reflections off.
 
+In v0.2.3: a player can opt in to test WoW64 Wine on their own PC before the team's OK, in a copy of their Wine prefix (Jacob's choice, 2026-10-30). It stays off for everyone else.
+
 Next:
 
 - Switch on the DXVK memory setting and WoW64 Wine once the ArcheAge Classic team OKs them, and repair the game's prefix.

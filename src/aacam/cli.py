@@ -264,7 +264,22 @@ def cmd_fixes(args, settings):
 
 
 def cmd_wine(args, settings):
-    if args.download_wow64:
+    if args.test_wow64:
+        print(f"Getting {wine.WOW64_NAME} (about 75 MB the first time)…")
+        build = wine.download_wow64()
+        print(f"Copying your Wine prefix to {wine.wow64_prefix()} (your current one stays as it is)…")
+        prefix = wine.prepare_wow64_prefix()
+        settings.set("wow64_opt_in", True)
+        settings.set("wine", str(build))
+        settings.set("wineprefix", str(prefix))
+        print("WoW64 Wine is on for this PC only. The ArcheAge Classic team hasn't confirmed it is allowed yet,\n"
+              "so you test it at your own risk. Go back with `aacam wine --stop-wow64`.")
+    elif args.stop_wow64:
+        settings.set("wow64_opt_in", False)
+        settings.set("wine", None)
+        settings.set("wineprefix", None)
+        print("Back to the normal Wine-Staging build.")
+    elif args.download_wow64:
         print(f"Downloading {wine.WOW64_NAME} (about 75 MB)…")
         build = wine.download_wow64()
         print(f"Saved to {build}")
@@ -276,7 +291,7 @@ def cmd_wine(args, settings):
             build = build.parent.parent
         if not os.access(build / "bin/wine", os.X_OK):
             raise CliError(f"no bin/wine in {build}")
-        if not wine.allowed(build):
+        if not wine.allowed(build, bool(settings.get("wow64_opt_in"))):
             raise CliError("WoW64 Wine builds wait for the ArcheAge Classic team's OK before they can be used")
         settings.set("wine", str(build))
     elif args.launcher:
@@ -285,10 +300,11 @@ def cmd_wine(args, settings):
         settings.set("wine", None)
     if args.prefix:
         settings.set("wineprefix", str(Path(args.prefix).expanduser().resolve()))
-    chosen = wine.choose(settings.get("wine"))
+    opt_in = bool(settings.get("wow64_opt_in"))
+    chosen = wine.choose(settings.get("wine"), opt_in=opt_in)
     print("Wine builds found:")
     for b in wine.builds():
-        note = "" if wine.allowed(b) else "  (waiting for the ArcheAge Classic team's OK)"
+        note = "" if wine.allowed(b, opt_in) else "  (waiting for the ArcheAge Classic team's OK)"
         print(f"  {'*' if b == chosen else ' '} {wine.label(b)}  {b}{note}")
     if chosen is None:
         print("The official launcher chooses Wine or Proton itself.")
@@ -361,6 +377,9 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--set", metavar="DIR", help="use this Wine build (a folder with bin/wine)")
     sp.add_argument("--auto", action="store_true", help="pick a Wine-Staging build automatically (default)")
     sp.add_argument("--launcher", action="store_true", help="let the official launcher choose")
+    sp.add_argument("--test-wow64", action="store_true",
+                    help="download WoW64 Wine and use it on this PC, before the ArcheAge Classic team OKs it (own risk)")
+    sp.add_argument("--stop-wow64", action="store_true", help="go back to the normal Wine-Staging build")
     sp.add_argument("--download-wow64", action="store_true",
                     help="download a WoW64 Wine-Staging build (used once the ArcheAge Classic team OKs it)")
     sp.add_argument("--prefix", metavar="DIR", help="Wine prefix (default ~/.local/share/AAClassic/wine-staging-pfx)")

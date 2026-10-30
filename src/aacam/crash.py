@@ -86,7 +86,7 @@ def launch_env(settings: Settings, home: Path | None = None) -> dict[str, str | 
     """Variables to add (or, as None, remove) when starting the official launcher."""
     # The anti-cheat polls unsupported winsock calls in a loop; Wine logging each one costs CPU.
     env: dict[str, str | None] = {MARKER: "1", "WINEDEBUG": "fixme-all"}
-    build = wine.choose(settings.get("wine"), home)
+    build = wine.choose(settings.get("wine"), home, bool(settings.get("wow64_opt_in")))
     if build is not None:
         env.update(wine.env(build, Path(settings.get("wineprefix") or wine.default_prefix(home))))
     for key in settings.get("fixes", []):

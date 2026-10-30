@@ -300,3 +300,38 @@ class Wow64Tests(TempHome):
             wine.download_wow64(self.home / "bad", url=archive.as_uri(), sha256="0" * 64)
         build = wine.download_wow64(self.home / "dest", url=archive.as_uri(), sha256=digest)
         self.assertTrue(os.access(build / "bin/wine", os.X_OK))
+
+
+class Wow64OptInTests(TempHome):
+    def test_player_can_opt_in_to_test_wow64(self):
+        from aacam import wine
+        w = fake_wine(self.home, "wine-11.0-staging-amd64-wow64", wow64=True)
+        s = Settings()
+        s.set("wine", str(w))
+        self.assertNotIn("AAC_WINE", crash.launch_env(s, self.home))  # not OK'd, not opted in
+        s.set("wow64_opt_in", True)
+        self.assertEqual(crash.launch_env(s, self.home)["AAC_WINE"], str(w / "bin/wine"))
+        self.assertIsNone(wine.choose(None, self.home, opt_in=True))  # never picked automatically
+
+    def test_cli_test_and_stop(self):
+        from aacam import wine
+        w = fake_wine(self.home, "wine-11.0-staging-amd64-wow64", wow64=True)
+        prefix = wine.default_prefix(self.home)
+        (prefix / "drive_c").mkdir(parents=True)
+        (prefix / "system.reg").write_text("reg")
+        (prefix / "dosdevices").mkdir()
+        (prefix / "dosdevices/c:").symlink_to("../drive_c")
+        with mock.patch.object(wine, "download_wow64", return_value=w), redirect_stdout(io.StringIO()) as out:
+            self.assertEqual(cli.main(["wine", "--test-wow64"]), 0)
+        copy = wine.wow64_prefix(self.home)
+        self.assertEqual(Settings().get("wineprefix"), str(copy))
+        self.assertTrue((copy / "dosdevices/c:").is_symlink())
+        self.assertTrue((prefix / "system.reg").is_file())  # the original stays
+        self.assertIn("own risk", out.getvalue())
+        self.assertTrue(Settings().get("wow64_opt_in"))
+        self.assertEqual(Settings().get("wine"), str(w))
+        with redirect_stdout(io.StringIO()):
+            self.assertEqual(cli.main(["wine", "--stop-wow64"]), 0)
+        self.assertFalse(Settings().get("wow64_opt_in"))
+        self.assertIsNone(Settings().get("wine"))
+        self.assertIsNone(Settings().get("wineprefix"))

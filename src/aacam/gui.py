@@ -75,7 +75,7 @@ class Job(QRunnable):
     def run(self) -> None:
         try:
             result = self.fn()
-        except (github.GitHubError, installer.InstallError, official.LauncherError, OSError) as e:
+        except (github.GitHubError, installer.InstallError, official.LauncherError, wine.WineError, OSError) as e:
             self.signals.failed.emit(str(e))
         except Exception:  # keep the window alive and show what went wrong
             self.signals.failed.emit(traceback.format_exc(limit=3))
@@ -276,17 +276,23 @@ class FixesDialog(QDialog):
         self.wine_combo = QComboBox()
         self.wine_combo.addItem("Automatic: Wine-Staging when it is installed", None)
         self.wine_combo.addItem("Let the official launcher choose (may pick Proton)", wine.LAUNCHER)
-        for build in wine.builds():
-            ok = wine.allowed(build)
-            self.wine_combo.addItem(wine.label(build) + ("" if ok else "  (waiting for the ArcheAge Classic team's OK)"),
-                                    str(build))
-            if not ok:
-                self.wine_combo.model().item(self.wine_combo.count() - 1).setEnabled(False)
         current = win.settings.get("wine")
+        self.wow64_opt_in = QCheckBox("Test WoW64 Wine on this PC (not yet OK'd by the ArcheAge Classic team; "
+                                      "your own risk)")
+        self.wow64_opt_in.setChecked(bool(win.settings.get("wow64_opt_in")))
+        self.wow64_opt_in.toggled.connect(self.fill_wine)
+        self.fill_wine()
         index = self.wine_combo.findData(current)
         self.wine_combo.setCurrentIndex(max(index, 0))
         form.addWidget(self.wine_combo)
-        chosen = wine.choose(current)
+        row = QHBoxLayout()
+        row.addWidget(self.wow64_opt_in, 1)
+        self.wow64_get = QPushButton("Download WoW64 Wine")
+        self.wow64_get.clicked.connect(self.download_wow64)
+        self.wow64_get.setVisible(not any(wine.is_wow64(b) for b in wine.builds()))
+        row.addWidget(self.wow64_get)
+        form.addLayout(row)
+        chosen = wine.choose(current, opt_in=bool(win.settings.get("wow64_opt_in")))
         note = QLabel(
             (f"Now: {chosen.name}. " if chosen else "Now: the official launcher's own choice. ")
             + "Under Proton the game's anti-cheat closes it after server select, so Wine-Staging is the safe "
@@ -332,12 +338,57 @@ class FixesDialog(QDialog):
         buttons.rejected.connect(self.reject)
         lay.addWidget(buttons)
 
+    def fill_wine(self) -> None:
+        """The Wine builds to choose from; WoW64 ones only for players who opted in to test them."""
+        keep = self.wine_combo.currentData()
+        self.wine_combo.clear()
+        self.wine_combo.addItem("Automatic: Wine-Staging when it is installed", None)
+        self.wine_combo.addItem("Let the official launcher choose (may pick Proton)", wine.LAUNCHER)
+        opt_in = self.wow64_opt_in.isChecked()
+        for build in wine.builds():
+            ok = wine.allowed(build, opt_in)
+            self.wine_combo.addItem(wine.label(build) + ("" if ok else "  (waiting for the ArcheAge Classic team's OK)"),
+                                    str(build))
+            if not ok:
+                self.wine_combo.model().item(self.wine_combo.count() - 1).setEnabled(False)
+        index = self.wine_combo.findData(keep)
+        if opt_in and index <= 0:
+            index = next((i for i in range(self.wine_combo.count())
+                          if (data := self.wine_combo.itemData(i)) and data != wine.LAUNCHER
+                          and wine.is_wow64(Path(data))), 0)
+        self.wine_combo.setCurrentIndex(max(index, 0))
+
+    def download_wow64(self) -> None:
+        self.wow64_get.setEnabled(False)
+
+        def done(_result) -> None:
+            self.wow64_get.setVisible(False)
+            self.wow64_opt_in.setChecked(True)
+            self.fill_wine()
+
+        def work():
+            return wine.download_wow64(), wine.prepare_wow64_prefix()
+
+        self.win.run("Downloading WoW64 Wine and copying your Wine prefix…", work, done,
+                     lambda _msg: self.wow64_get.setEnabled(True))
+
     def save(self) -> None:
         for key, cb in self.boxes.items():
             if cb.isEnabled():
                 crash.set_fix(self.win.settings, key, cb.isChecked())
         self.win.settings.set("diagnostics", self.diagnostics.isChecked())
-        self.win.settings.set("wine", self.wine_combo.currentData())
+        chosen = self.wine_combo.currentData()
+        wow64 = bool(chosen) and chosen != wine.LAUNCHER and wine.is_wow64(Path(chosen))
+        if wow64:
+            try:
+                prefix = wine.prepare_wow64_prefix()  # quick when the copy already exists
+            except (wine.WineError, OSError) as e:
+                QMessageBox.warning(self, APP_NAME, f"Could not prepare a prefix for WoW64 Wine: {e}")
+                return
+        self.win.settings.set("wow64_opt_in", self.wow64_opt_in.isChecked())
+        self.win.settings.set("wine", chosen)
+        # WoW64 tests run in a copy of the prefix; anything else uses the launcher's own.
+        self.win.settings.set("wineprefix", str(prefix) if wow64 else None)
         self.win.statusBar().showMessage("Saved. Fixes apply the next time you press Play.", 6000)
         self.accept()
 
