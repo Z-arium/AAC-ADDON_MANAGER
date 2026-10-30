@@ -78,7 +78,7 @@ In v0.2.4: HTTPS works from the AppImage on Arch (it couldn't find Arch's CA cer
 
 In v0.2.5: a new look. The window opens on a Play screen with painted art, a big Play button and status tiles, and has a sidebar for My Addons, Get Addons, Crash fixes and Setup, in a dark and gold theme that looks the same on KDE and GNOME.
 
-In v0.2.6: v0.2.5's look read as generic (Jacob, 2026-10-30), so it was replaced. The window now uses the desktop's own colours, and the Play tab shows the player's own in-game screenshot instead of drawn art.
+In v0.2.7: v0.2.5's look read as generic (Jacob, 2026-10-30), so it was replaced. The window now uses the desktop's own colours, and the Play tab shows the player's own in-game screenshot instead of drawn art.
 
 Next:
 
