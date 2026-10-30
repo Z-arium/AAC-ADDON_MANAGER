@@ -72,9 +72,11 @@ def reports_dir() -> Path:
 
 
 def diagnostics_env(directory: Path) -> dict[str, str]:
-    """Extra logging for one session: Wine exceptions, a Proton log and a DXVK log."""
+    """Extra logging for one session: loaded DLLs, a Proton log and a DXVK log. Not +seh: the game unwinds
+    C++ exceptions all the time, and tracing them wrote 11 MB in under three minutes and cost FPS. Wine
+    still logs unhandled exceptions without it."""
     return {
-        "WINEDEBUG": "fixme-all,+seh",
+        "WINEDEBUG": "fixme-all,+loaddll",
         "PROTON_LOG": "1",
         "PROTON_LOG_DIR": str(directory),
         "DXVK_LOG_LEVEL": "info",
@@ -199,6 +201,10 @@ class Sampler:
             return
         snap = snapshot(found[0])
         if snap is None:
+            return
+        # Wine's start.exe outlives the game by a moment; keep the game's own readings, not its.
+        argv0 = (snap.get("cmdline") or [""])[0].replace("\\", "/").lower()
+        if self.game is not None and not argv0.endswith("archeage.exe"):
             return
         self.samples += 1
         self.last = {k: snap[k] for k in SAMPLE_KEYS if k in snap}
@@ -373,6 +379,8 @@ SIGNS: tuple[tuple[str, re.Pattern, str, str, str | None], ...] = (
 
 
 KERNEL_SIGNS = {"oom_killed", "gpu_fault"}
+# The game's own log when the player quits (ArcheAge.log).
+QUIT_RE = re.compile(r"desc=graceful exit|\] System:Quit")
 
 
 def _gpus_text(text: str) -> tuple[bool, bool]:
@@ -411,9 +419,11 @@ def analyze(texts: dict[str, str], sampler: Sampler | None, settings: Settings, 
                                 "The official launcher starts the game without the variables we pass it, so "
                                 "switches in this launcher have no effect. Please report this.", False))
 
-    if game is not None and played is not None and played < 5 * 60:
-        where = (game.get("exe", "") + " " + " ".join(game.get("env", {}))).lower()
-        if "proton" in where or "steam_compat" in where:
+    # A quit from the game's menu is not a crash, however short the session.
+    quit = QUIT_RE.search(logs) is not None and not any(f.crash for f in findings)
+    if game is not None and played is not None and played < 5 * 60 and not quit:
+        # Our own PROTON_* switches are set for any Wine, so only Proton's path or Steam's variables count.
+        if "proton" in game.get("exe", "").lower() or any(k.startswith("STEAM_COMPAT") for k in game.get("env", {})):
             findings.append(Finding("proton_anticheat", "The game ran under Proton",
                                     "Under Proton the game's anti-cheat closes it soon after server select. "
                                     "Choose a Wine-Staging build in Crash fixes instead.", True))
@@ -427,7 +437,7 @@ def analyze(texts: dict[str, str], sampler: Sampler | None, settings: Settings, 
                                 "The game may start on the built-in one. Running it on the NVIDIA card avoids "
                                 "crashes and slowness from that.", False, "nvidia_gpu"))
 
-    if played is not None and played < official.GameWatch.QUICK_EXIT and not any(f.crash for f in findings):
+    if played is not None and played < official.GameWatch.QUICK_EXIT and not quit and not any(f.crash for f in findings):
         findings.append(Finding("quick_exit", "The game closed soon after it started",
                                 f"It ran for {played:.0f} seconds without leaving a reason in the logs. "
                                 "Turn on diagnostics and play again to record one.", True))
