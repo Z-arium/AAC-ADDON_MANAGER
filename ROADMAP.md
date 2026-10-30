@@ -105,17 +105,18 @@ Goal: nobody hits an error they cannot understand.
 - A log file (`~/.local/state/aacam/aacam.log`), "Copy diagnostics", "Open log folder" and "Report a bug" in Setup, and a bug report issue template.
 - Tests for the GUI's core flows (install, track, update, disable, remove, token, rate limit) and for path detection across Bottles, Flatpak Steam, `$WINEPREFIX` and non-English Documents folders, which also fixed detection of `~/Dokumente/AAClassic` and other translated Documents folders. CI runs them on Arch Linux with Arch's own PySide6.
 
-## v0.4: Addons that feel like WowUp
+## v0.4: Addons that feel like WowUp (released as v0.4.0)
 
 Goal: addon management feels like WowUp, not a table.
 
-- Addon details page: description, author, tags, dependencies, changelog from the GitHub release notes, link to the repo.
-- Update badges and a count on the My Addons tab; changelog preview before you update.
-- Roll back to the previous version of an addon (keep the last installed zip).
-- Back up and restore addon settings (the `.data` folders) and `addons.txt`.
-- Auto-update addons on start, and an option to update before Play.
-- Sort and filter My Addons (enabled, has update, name); show download counts and last-updated dates in Get Addons.
-- Dark and light theme that follows the desktop; a proper app icon set.
+- Addon details (Details, or double-click an addon): description, author, tags, dependencies, link to the repo, and its releases with their notes. `aacam changes NAME` prints the notes.
+- A count of updates on the My Addons tab; Update… shows what's new since your version before it updates, and Update all lists each update's notes first.
+- Roll back to the previous version from the addon's details or `aacam rollback NAME`: the last two installed zips are kept, settings stay, and the version rolled back from isn't offered again until a newer one is out.
+- Backups of every addon's settings (the `.data` folders) and `addons.txt`: made automatically before each update (the last ten kept), by hand from My Addons > Backups… or `aacam backup`, and restorable from the same places, after saving what's there now.
+- Options to update addons when the launcher starts and when you press Play (Setup, or `aacam options`).
+- Filter My Addons (enabled, disabled, has an update) and sort it (name, updates first, enabled first, recently released); Get Addons shows each addon's last release date and download count, and sorts by them.
+- An app icon in the launcher's parchment look, at every size from 16 to 512 pixels.
+- The look stays parchment on every desktop (Jacob's call, 2026-10-30), so there is no dark or light theme that follows the desktop.
 
 ## v0.5: Easy to get and keep current
 

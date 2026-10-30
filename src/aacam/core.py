@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import re
+import shutil
 import tempfile
 import time
 from dataclasses import dataclass
 from pathlib import Path
 
-from . import github, installer, paths
-from .config import InstalledDb, Settings
+from . import backup, github, installer, paths
+from .config import InstalledDb, Settings, data_dir
 from .registry import Addon, Registry
 
 
@@ -68,24 +69,76 @@ class Manager:
         enabled = set(installer.read_enabled(self.install))
         return sorted(enabled - set(installer.local_addons(self.install)) - installer.IGNORED)
 
+    def archive_dir(self, name: str) -> Path:
+        """Zips of the installed and the previous version of one addon, for rolling back."""
+        return data_dir() / "archives" / backup.folder(self.install).name / name
+
+    def _keep_archive(self, name: str, archive: Path, version: str) -> str:
+        """Store the zip just installed; _prune_archives keeps only it and the one before."""
+        keep = self.archive_dir(name)
+        keep.mkdir(parents=True, exist_ok=True)
+        dest = keep / (re.sub(r"[^A-Za-z0-9._@-]", "_", version) + ".zip")
+        if archive.resolve() != dest.resolve():
+            shutil.copy2(archive, dest)
+        return str(dest)
+
     def install_one(self, addon: Addon, release: github.Release | None = None, from_repo: bool = False) -> github.Release:
         release = release or github.latest_release(addon.repo, addon.branch)
         with tempfile.TemporaryDirectory() as tmp:
             archive = github.download(release.zip_url, Path(tmp) / f"{addon.name}.zip")
             installer.install_zip(self.install, addon.name, archive)
+            kept = self._keep_archive(addon.name, archive, release.version)
         installer.restore_kept_data(self.install, addon.name)
         installer.enable(self.install, addon.name)
+        old = self.db.addons.get(addon.name) or {}
         rec = {
             "version": release.version,
             "repo": addon.repo,
             "commit": release.commit,
             "installed_at": int(time.time()),
+            "archive": kept,
         }
-        if from_repo or self.db.addons.get(addon.name, {}).get("source") == "repo":
+        if release.published:
+            rec["published"] = release.published
+        if old.get("archive") and old.get("version") != release.version:
+            rec["previous"] = {k: old.get(k) for k in ("version", "commit", "archive", "published")}
+        elif old.get("previous"):
+            rec["previous"] = old["previous"]
+        if from_repo or old.get("source") == "repo":
             rec.update(source="repo", branch=addon.branch)
+        elif old.get("catalogue"):
+            rec["catalogue"] = old["catalogue"]
         self.db.addons[addon.name] = rec
+        self._prune_archives(addon.name)
         self.db.save()
         return release
+
+    def _prune_archives(self, name: str) -> None:
+        rec = self.db.addons.get(name) or {}
+        wanted = {Path(p).name for p in (rec.get("archive"), (rec.get("previous") or {}).get("archive")) if p}
+        for old in self.archive_dir(name).glob("*.zip"):
+            if old.name not in wanted:
+                old.unlink(missing_ok=True)
+
+    def can_roll_back(self, name: str) -> str | None:
+        """The version a roll back would return to, if its zip was kept."""
+        prev = (self.db.addons.get(name) or {}).get("previous") or {}
+        return prev.get("version") if prev.get("archive") and Path(prev["archive"]).is_file() else None
+
+    def roll_back(self, name: str) -> str:
+        """Reinstall the previous version from its kept zip; settings stay. Rolling back again goes forward."""
+        rec = self.db.addons.get(name)
+        if not rec or not self.can_roll_back(name):
+            raise installer.InstallError(f"no earlier version of {name} is kept; only updates made with v0.4 or later can be rolled back")
+        prev = rec["previous"]
+        installer.install_zip(self.install, name, Path(prev["archive"]))
+        current = {k: rec.get(k) for k in ("version", "commit", "archive", "published")}
+        rec.update({k: prev.get(k) for k in ("version", "commit", "archive", "published")})
+        rec["previous"] = current
+        rec["installed_at"] = int(time.time())
+        rec["pinned"] = True  # don't offer the version just rolled back from as an update
+        self.db.save()
+        return rec["version"]
 
     def add(self, reg: Registry, name: str) -> list[tuple[Addon, github.Release]]:
         """Install name and any dependencies not already present; returns what was installed."""
@@ -136,7 +189,10 @@ class Manager:
             except github.GitHubError as e:
                 self.check_errors[name] = str(e)  # one broken repo doesn't stop the rest
                 continue
-            if release.version != self.db.addons[name]["version"]:
+            rec = self.db.addons[name]
+            if rec.get("pinned") and release.version == (rec.get("previous") or {}).get("version"):
+                continue  # rolled back from this version on purpose; offer the next one
+            if release.version != rec["version"]:
                 out[name] = release
         return out
 
@@ -170,7 +226,21 @@ class Manager:
             self.db.addons[name]["catalogue"] = addon.name
         self.db.save()
 
+    def changelog(self, reg: Registry, name: str, limit: int = 10) -> list[github.Release]:
+        """Releases newer than the installed one, newest first (all recent ones if not installed)."""
+        addon = self.addon_for(reg, name)
+        if addon is None:
+            raise NotFound(name)
+        installed = (self.db.addons.get(name) or {}).get("version")
+        out = []
+        for rel in github.releases(addon.repo, addon.branch, limit):
+            if rel.version == installed:
+                break
+            out.append(rel)
+        return out
+
     def remove(self, name: str, purge: bool = False) -> None:
         installer.remove(self.install, name, purge=purge)
         self.db.addons.pop(name, None)
         self.db.save()
+        shutil.rmtree(self.archive_dir(name), ignore_errors=True)

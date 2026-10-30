@@ -34,13 +34,17 @@ done
   packaging/appimage_entry.py
 
 app="$work/AppDir"
-mkdir -p "$app/usr/bin" "$app/usr/share/applications" "$app/usr/share/icons/hicolor/256x256/apps"
+mkdir -p "$app/usr/bin" "$app/usr/share/applications"
 cp -r "$work/pyi/aac-linux-launcher/." "$app/usr/bin/"
 cp packaging/aac-linux-launcher.desktop "$app/aac-linux-launcher.desktop"
 sed -i 's|^Exec=.*|Exec=aac-linux-launcher|' "$app/aac-linux-launcher.desktop"
 cp "$app/aac-linux-launcher.desktop" "$app/usr/share/applications/"
 cp src/aacam/icon.png "$app/aac-linux-launcher.png"
-cp src/aacam/icon.png "$app/usr/share/icons/hicolor/256x256/apps/aac-linux-launcher.png"
+for png in src/aacam/icons/*.png; do
+  size=$(basename "$png" .png)
+  mkdir -p "$app/usr/share/icons/hicolor/${size}x${size}/apps"
+  cp "$png" "$app/usr/share/icons/hicolor/${size}x${size}/apps/aac-linux-launcher.png"
+done
 cat > "$app/AppRun" <<'RUN'
 #!/bin/sh
 here=$(dirname "$(readlink -f "$0")")
