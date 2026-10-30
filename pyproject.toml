@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "aacam"
-version = "0.2.8"
+version = "0.2.9"
 description = "ArcheAge Classic Linux Launcher: get the game running on Linux and manage addons (Wine, Proton, Lutris, Bottles)"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -23,4 +23,4 @@ aacam-gui = "aacam.gui:main"
 where = ["src"]
 
 [tool.setuptools.package-data]
-aacam = ["icon.png"]
+aacam = ["icon.png", "fonts/*"]

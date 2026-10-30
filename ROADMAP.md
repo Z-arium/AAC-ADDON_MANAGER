@@ -84,6 +84,8 @@ In v0.2.7: v0.2.5's look read as generic (Jacob, 2026-10-30), so it was replaced
 
 In v0.2.8: diagnostics no longer trace every Wine exception (+seh), which wrote 11 MB of log in under three minutes and cost FPS. Quitting from the game's menu is no longer reported as a crash, and a Wine build is no longer mistaken for Proton because of our own PROTON_* switches. First WoW64 test (2026-10-30): no anti-cheat kick, the game reached the world on DXVK and the NVIDIA card.
 
+In v0.2.9: the look Jacob picked (2026-10-30): the launcher looks like a window from ArcheAge, with parchment, bronze tabs and the bundled Alegreya fonts. The in-game screenshot is gone from Play (Jacob didn't want it); a plaque with the state, the steps and Play sits over three columns: your addons, the checks, and recent sessions with readable crash causes.
+
 Next:
 
 - Switch on the DXVK memory setting and WoW64 Wine once the ArcheAge Classic team OKs them, and repair the game's prefix.
