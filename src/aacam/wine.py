@@ -30,6 +30,7 @@ PROTON_VARS = ("AAC_PROTON", "AAC_STEAM_PATH", "AAC_STEAM_COMPAT_APP_ID", "AAC_S
 # driver live in 64-bit memory, leaving the game more of its 4 GB. Per the ground rule in ROADMAP.md it
 # stays switched off until the ArcheAge Classic team confirms it is allowed.
 WOW64_CLEARED = False
+# Until then a player can opt in to test it on their own PC, at their own risk (setting "wow64_opt_in").
 WOW64_NAME = "wine-11.0-staging-amd64-wow64"
 WOW64_URL = f"https://github.com/Kron4ek/Wine-Builds/releases/download/11.0/{WOW64_NAME}.tar.xz"
 WOW64_SHA256 = "e6538a417dd2e7f738ad77addf74bfd9e45c9d970653674f93bde2df29055f2f"  # from the release's sha256sums.txt
@@ -76,22 +77,43 @@ def label(build: Path) -> str:
     return f"{build.name}{' (WoW64)' if is_wow64(build) else ''}"
 
 
-def allowed(build: Path) -> bool:
-    return WOW64_CLEARED or not is_wow64(build)
+def allowed(build: Path, opt_in: bool = False) -> bool:
+    return WOW64_CLEARED or opt_in or not is_wow64(build)
 
 
 def default_prefix(home: Path | None = None) -> Path:
     return (home or Path.home()) / ".local/share/AAClassic/wine-staging-pfx"
 
 
-def choose(setting: str | None, home: Path | None = None) -> Path | None:
+def wow64_prefix(home: Path | None = None) -> Path:
+    return (home or Path.home()) / ".local/share/AAClassic/wine-staging-wow64-pfx"
+
+
+def prepare_wow64_prefix(home: Path | None = None) -> Path:
+    """A copy of the working Wine-Staging prefix for WoW64 tests, so the original stays untouched
+    and switching back is instant."""
+    target = wow64_prefix(home)
+    if (target / "system.reg").is_file():
+        return target
+    source = default_prefix(home)
+    if not (source / "system.reg").is_file():
+        raise WineError(f"no Wine-Staging prefix to copy at {source}; start the game once with Wine-Staging first")
+    partial = target.with_name(target.name + ".partial")
+    if partial.exists():
+        shutil.rmtree(partial)
+    shutil.copytree(source, partial, symlinks=True)
+    partial.rename(target)
+    return target
+
+
+def choose(setting: str | None, home: Path | None = None, opt_in: bool = False) -> Path | None:
     """The Wine build to use: the saved one, else a Wine-Staging build when the official
     launcher's Wine-Staging prefix exists, else None (the launcher decides)."""
     if setting == LAUNCHER:
         return None
     if setting:
         build = Path(setting)
-        if os.access(build / "bin/wine", os.X_OK) and allowed(build):
+        if os.access(build / "bin/wine", os.X_OK) and allowed(build, opt_in):
             return build
     if not (default_prefix(home) / "system.reg").is_file():
         return None
