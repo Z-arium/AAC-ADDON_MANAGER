@@ -36,13 +36,16 @@ from PySide6.QtWidgets import (
     QScrollArea,
     QTableWidget,
     QTableWidgetItem,
+    QTextBrowser,
+    QListWidget,
+    QListWidgetItem,
     QTabBar,
     QTabWidget,
     QVBoxLayout,
     QWidget,
 )
 
-from . import __version__, crash, github, installer, logs, official, paths, report, syscheck, theme, wine
+from . import __version__, backup, crash, github, installer, logs, official, paths, report, syscheck, theme, wine
 from .config import Settings
 from .core import Manager
 from .registry import Addon, Registry
@@ -303,6 +306,20 @@ class SetupPanel(QWidget):
         form.addLayout(row)
         self.token_label = _label(muted=True)
         form.addWidget(self.token_label)
+        lay.addWidget(box)
+
+        box = QGroupBox("5. Addon updates")
+        form = QVBoxLayout(box)
+        for key, default, text in (
+            ("update_on_start", False, "Update addons when the launcher starts"),
+            ("update_before_play", True, "Update addons when I press Play"),
+        ):
+            check = QCheckBox(text)
+            check.setChecked(bool(self.win.settings.get(key, default)))
+            check.toggled.connect(lambda on, k=key: self.win.settings.set(k, on))
+            form.addWidget(check)
+        form.addWidget(_label("Addon settings and addons.txt are backed up before every update "
+                              "(My Addons > Backups…), and each addon can be rolled back from its details.", muted=True))
         lay.addWidget(box)
         self.refresh()
 
@@ -592,6 +609,202 @@ class FixesDialog(QDialog):
             self.accept()
 
 
+# --- addon details, what's new, backups ---------------------------------------------
+
+def _date(iso: str) -> str:
+    return iso[:10] if iso else ""
+
+
+def _notes_html(releases: list[github.Release]) -> str:
+    """Release notes as simple HTML; GitHub's notes are Markdown, which Qt renders."""
+    parts = []
+    for rel in releases:
+        parts.append(f"### {rel.version}  \n*{_date(rel.published)}*\n\n{rel.notes or '_No notes for this release._'}\n")
+    return "\n".join(parts) or "_No release notes._"
+
+
+def _browser() -> QTextBrowser:
+    view = QTextBrowser()
+    view.setOpenExternalLinks(True)
+    view.setObjectName("paper")
+    return view
+
+
+class AddonDialog(QDialog):
+    """Everything about one addon: description, author, tags, dependencies, its releases and notes,
+    and what can be done with it (install, update, roll back, open on GitHub)."""
+
+    def __init__(self, win: MainWindow, name: str, show_new: bool = False) -> None:
+        super().__init__(win)
+        self.win, self.name = win, name
+        reg, mgr = win.registry, win.mgr
+        addon = (mgr.addon_for(reg, name) if mgr and reg else None) or (reg.get(name) if reg else None)
+        meta = reg.get((mgr.db.addons.get(name) or {}).get("catalogue") or name) if reg and mgr else addon
+        meta = meta or addon
+        self.addon = addon
+        rec = (mgr.db.addons.get(name) if mgr else None) or {}
+        self.setWindowTitle(meta.alias if meta else name)
+        self.resize(720, 620)
+        lay = QVBoxLayout(self)
+        title = QLabel(meta.alias if meta else name)
+        title.setObjectName("h1")
+        lay.addWidget(title)
+        facts = []
+        if meta and meta.author:
+            facts.append(f"by {meta.author}")
+        if rec.get("version"):
+            facts.append(f"installed {rec['version']}" + (f" ({_date(rec.get('published', ''))})" if rec.get("published") else ""))
+        latest = win.updates.get(name)
+        if latest:
+            facts.append(_word("positive", f"update {latest.version}"))
+        lay.addWidget(_label(" · ".join(facts), muted=True, rich=True))
+        if meta and meta.description:
+            lay.addWidget(_label(meta.description))
+        extra = []
+        if meta and meta.tags:
+            extra.append("Tags: " + ", ".join(meta.tags))
+        if meta and meta.dependencies:
+            extra.append("Needs: " + ", ".join(meta.dependencies))
+        if addon:
+            extra.append(f'<a href="https://github.com/{addon.repo}">github.com/{addon.repo}</a>')
+        if extra:
+            links = _label(" · ".join(extra), muted=True, rich=True)
+            links.setOpenExternalLinks(True)
+            lay.addWidget(links)
+        self.heading = _label("What's new" if show_new and rec else "Releases")
+        self.heading.setObjectName("h2")
+        lay.addWidget(self.heading)
+        self.notes = _browser()
+        self.notes.setMarkdown("Loading release notes…")
+        lay.addWidget(self.notes, 1)
+
+        buttons = QDialogButtonBox()
+        installed = mgr is not None and (mgr.install.addon_dir / name / "main.lua").is_file()
+        if not installed and reg and reg.get(name):
+            buttons.addButton("Install", QDialogButtonBox.ActionRole).clicked.connect(
+                lambda: (self.accept(), win.add(reg.get(name))))
+        if latest:
+            buttons.addButton(f"Update to {latest.version}", QDialogButtonBox.ActionRole).clicked.connect(
+                lambda: (self.accept(), win.update([name])))
+        back = mgr.can_roll_back(name) if mgr else None
+        if back:
+            buttons.addButton(f"Roll back to {back}", QDialogButtonBox.ActionRole).clicked.connect(
+                lambda: (self.accept(), win.roll_back(name)))
+        buttons.addButton("Close", QDialogButtonBox.RejectRole)
+        buttons.rejected.connect(self.reject)
+        lay.addWidget(buttons)
+
+        if addon is None:
+            self.notes.setMarkdown("_This addon isn't in the catalogue, so there are no release notes._")
+        else:
+            only_new = show_new and bool(rec.get("version"))
+            work = (lambda: mgr.changelog(reg, name)) if only_new and mgr and reg else \
+                (lambda: github.releases(addon.repo, addon.branch))
+            win.run("Loading release notes…", work, self._show, lambda _m: self.notes.setMarkdown(
+                "_Could not load the release notes._"))
+
+    def _show(self, releases: list[github.Release]) -> None:
+        self.notes.setMarkdown(_notes_html(releases))
+
+
+class UpdateDialog(QDialog):
+    """What's new in each pending update, before Update all."""
+
+    def __init__(self, win: MainWindow, pending: dict[str, github.Release]) -> None:
+        super().__init__(win)
+        self.setWindowTitle("Update addons")
+        self.resize(680, 560)
+        lay = QVBoxLayout(self)
+        n = len(pending)
+        lay.addWidget(_label(f"{n} addon{'s' if n != 1 else ''} will be updated. Their settings are backed up "
+                             "first, and each can be rolled back from its details afterwards."))
+        view = _browser()
+        md = []
+        for name, rel in sorted(pending.items(), key=lambda kv: kv[0].lower()):
+            have = (win.mgr.db.addons.get(name) or {}).get("version", "?") if win.mgr else "?"
+            md.append(f"## {name}: {have} → {rel.version}\n*{_date(rel.published)}*\n\n"
+                      f"{rel.notes or '_No release notes._'}\n")
+        view.setMarkdown("\n".join(md))
+        lay.addWidget(view, 1)
+        buttons = QDialogButtonBox()
+        buttons.addButton("Update", QDialogButtonBox.AcceptRole)
+        buttons.addButton("Not now", QDialogButtonBox.RejectRole)
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        lay.addWidget(buttons)
+
+
+class BackupsDialog(QDialog):
+    """Snapshots of addon settings and addons.txt: make one, or put one back."""
+
+    def __init__(self, win: MainWindow) -> None:
+        super().__init__(win)
+        self.win = win
+        self.setWindowTitle("Addon settings backups")
+        self.resize(640, 460)
+        lay = QVBoxLayout(self)
+        lay.addWidget(_label(
+            "A backup holds every addon's saved settings (its .data folder) and addons.txt, the list of addons "
+            "the game loads. One is made automatically before each update; the last ten of those are kept."))
+        self.list = QListWidget()
+        self.list.itemSelectionChanged.connect(self._selected)
+        lay.addWidget(self.list, 1)
+        self.detail = _label(muted=True)
+        lay.addWidget(self.detail)
+        buttons = QDialogButtonBox()
+        buttons.addButton("Back up now", QDialogButtonBox.ActionRole).clicked.connect(self.make)
+        self.restore_btn = buttons.addButton("Restore", QDialogButtonBox.ActionRole)
+        self.restore_btn.clicked.connect(self.restore)
+        buttons.addButton("Open folder", QDialogButtonBox.ActionRole).clicked.connect(
+            lambda: QDesktopServices.openUrl(QUrl.fromLocalFile(str(backup.folder(win.mgr.install)))))
+        buttons.addButton("Close", QDialogButtonBox.RejectRole)
+        buttons.rejected.connect(self.reject)
+        lay.addWidget(buttons)
+        self.fill()
+
+    def fill(self) -> None:
+        self.list.clear()
+        for b in backup.list_backups(self.win.mgr.install):
+            item = QListWidgetItem(b.label)
+            item.setData(Qt.UserRole, b)
+            self.list.addItem(item)
+        if self.list.count():
+            self.list.setCurrentRow(0)
+        self._selected()
+
+    def _current(self) -> backup.Backup | None:
+        item = self.list.currentItem()
+        return item.data(Qt.UserRole) if item else None
+
+    def _selected(self) -> None:
+        b = self._current()
+        self.restore_btn.setEnabled(b is not None)
+        if b is None:
+            self.detail.setText("No backups yet.")
+            return
+        has_txt, addons = backup.contents(b)
+        self.detail.setText(f"Settings of {len(addons)} addon{'s' if len(addons) != 1 else ''}"
+                            f"{' and addons.txt' if has_txt else ''}: {', '.join(addons) or 'none'}")
+
+    def make(self) -> None:
+        backup.create(self.win.mgr.install)
+        self.fill()
+
+    def restore(self) -> None:
+        b = self._current()
+        if b is None or not self.win._guard():
+            return
+        answer = QMessageBox.question(
+            self, APP_NAME, f"Put back the addon settings and addons.txt from {b.label}?\n\n"
+            "What you have now is backed up first, so you can undo this.")
+        if answer != QMessageBox.Yes:
+            return
+        backup.restore(self.win.mgr.install, b)
+        self.fill()
+        self.win.refresh_installed()
+        self.win.statusBar().showMessage(f"Restored the backup from {b.label}", 6000)
+
+
 # --- main window --------------------------------------------------------------
 
 class MainWindow(QMainWindow):
@@ -607,6 +820,7 @@ class MainWindow(QMainWindow):
         self.registry: Registry | None = None
         self.updates: dict[str, github.Release] = {}
         self.untracked: dict[str, Addon] = {}  # installed by hand, found in the catalogue
+        self.started_updates = False  # the first update check after start has run
         self.checks: list[syscheck.Check] | None = None
         self.pool = QThreadPool.globalInstance()
         self.jobs: set[Job] = set()
@@ -817,9 +1031,25 @@ class MainWindow(QMainWindow):
         tr.addWidget(self.track_all_btn)
         self.track_row.hide()
         lay.addWidget(self.track_row)
-        self.installed = _table(["On", "Addon", "Installed", "Latest", ""], stretch=1)
-        self.installed.horizontalHeader().setSectionResizeMode(4, QHeaderView.Fixed)
-        self.installed.setColumnWidth(4, 180)
+        row = QHBoxLayout()
+        self.addon_filter = QComboBox()
+        self.addon_filter.addItems(["All addons", "Enabled", "Disabled", "Has an update"])
+        self.addon_filter.currentIndexChanged.connect(self.refresh_installed)
+        row.addWidget(self.addon_filter)
+        self.addon_sort = QComboBox()
+        self.addon_sort.addItems(["Sort by name", "Updates first", "Enabled first", "Recently released"])
+        self.addon_sort.currentIndexChanged.connect(self.refresh_installed)
+        row.addWidget(self.addon_sort)
+        row.addStretch()
+        row.addWidget(_button("Backups…", self.show_backups,
+                              "Back up or restore every addon's settings and addons.txt"))
+        lay.addLayout(row)
+        self.installed = _table(["On", "Addon", "Installed", "Released", "Latest", ""], stretch=1)
+        self.installed.horizontalHeader().setSectionResizeMode(5, QHeaderView.Fixed)
+        self.installed.setColumnWidth(5, 270)
+        self.installed.setToolTip("Double-click an addon for its details and release notes")
+        self.installed.cellDoubleClicked.connect(
+            lambda r, _c: self.show_addon(self.installed.item(r, 1).data(Qt.UserRole)))
         lay.addWidget(self.installed, 1)
         self.empty_label = _label("No addons yet. Find some in Get Addons.", muted=True)
         self.empty_label.setAlignment(Qt.AlignCenter)
@@ -838,10 +1068,20 @@ class MainWindow(QMainWindow):
         self.tag_filter.addItem("All tags")
         self.tag_filter.currentIndexChanged.connect(self.refresh_browse)
         row.addWidget(self.tag_filter)
+        self.browse_sort = QComboBox()
+        self.browse_sort.addItems(["Sort by name", "Recently updated", "Most downloaded"])
+        self.browse_sort.currentIndexChanged.connect(self.refresh_browse)
+        row.addWidget(self.browse_sort)
+        self.dates_btn = _button("Get release dates", self.load_dates,
+                                 "Look up each addon's latest release on GitHub (one lookup per addon)")
+        row.addWidget(self.dates_btn)
         lay.addLayout(row)
-        self.browse = _table(["Addon", "Author", "Tags", "Description", ""], stretch=3)
-        self.browse.horizontalHeader().setSectionResizeMode(4, QHeaderView.Fixed)
-        self.browse.setColumnWidth(4, 110)
+        self.browse = _table(["Addon", "Author", "Tags", "Updated", "Description", ""], stretch=4)
+        self.browse.horizontalHeader().setSectionResizeMode(5, QHeaderView.Fixed)
+        self.browse.setColumnWidth(5, 110)
+        self.browse.setToolTip("Double-click an addon for its details and release notes")
+        self.browse.cellDoubleClicked.connect(
+            lambda r, _c: self.show_addon(self.browse.item(r, 0).data(Qt.UserRole)))
         lay.addWidget(self.browse, 1)
         return w
 
@@ -1106,6 +1346,7 @@ class MainWindow(QMainWindow):
             f"({', '.join(self.untracked)}). Track {'them' if n != 1 else 'it'} to get updates.")
         self.track_row.setVisible(bool(n))
         self.empty_label.setVisible(not local)
+        local = self._filter_sort(local)
         self.installed.setRowCount(len(local))
         for row, a in enumerate(local):
             box = QCheckBox()
@@ -1117,10 +1358,14 @@ class MainWindow(QMainWindow):
             cl.setContentsMargins(0, 0, 0, 0)
             cl.addWidget(box, 0, Qt.AlignCenter)
             self.installed.setCellWidget(row, 0, cell)
-            meta = self.registry.get(a.name) if self.registry else None
+            rec = self.mgr.db.addons.get(a.name) or {}
+            meta = self.registry.get(rec.get("catalogue") or a.name) if self.registry else None
             title = meta.alias if meta else a.name
-            self.installed.setItem(row, 1, _item(title, meta.description if meta else ""))
+            name_item = _item(title, meta.description if meta else "")
+            name_item.setData(Qt.UserRole, a.name)
+            self.installed.setItem(row, 1, name_item)
             self.installed.setItem(row, 2, _item(a.version))
+            self.installed.setItem(row, 3, _item(_date(rec.get("published", ""))))
             latest = self.updates.get(a.name)
             failed = self.mgr.check_errors.get(a.name)
             if latest:
@@ -1132,21 +1377,41 @@ class MainWindow(QMainWindow):
             else:
                 status = _item("" if not a.managed else "up to date")
             status.setForeground(theme.colour("positive" if latest else "negative" if failed else "inactive"))
-            self.installed.setItem(row, 3, status)
+            self.installed.setItem(row, 4, status)
             actions = QWidget()
             al = QHBoxLayout(actions)
             al.setContentsMargins(4, 2, 4, 2)
             if latest:
-                al.addWidget(_button("Update", lambda _=False, n=a.name: self.update([n])))
+                al.addWidget(_button("Update…", lambda _=False, n=a.name: self.show_addon(n, show_new=True),
+                                     "See what's new, then update"))
             elif a.name in self.untracked:
                 al.addWidget(_button("Track", lambda _=False, n=a.name: self.track([n]),
                                      "Check it for updates from now on"))
+            al.addWidget(_button("Details", lambda _=False, n=a.name: self.show_addon(n),
+                                 "Description, release notes, roll back"))
             al.addWidget(_button("Remove", lambda _=False, n=a.name: self.remove(n)))
-            self.installed.setCellWidget(row, 4, actions)
+            self.installed.setCellWidget(row, 5, actions)
         self.update_all_btn.setText(f"Update all ({len(self.updates)})" if self.updates else "Update all")
         self.update_all_btn.setEnabled(bool(self.updates) and not self.busy)
         self.refresh_header()
         self.refresh_browse()
+
+    def _filter_sort(self, local: list) -> list:
+        which = self.addon_filter.currentIndex()
+        if which == 1:
+            local = [a for a in local if a.enabled]
+        elif which == 2:
+            local = [a for a in local if not a.enabled]
+        elif which == 3:
+            local = [a for a in local if a.name in self.updates]
+        order = self.addon_sort.currentIndex()
+        if order == 1:
+            local.sort(key=lambda a: a.name not in self.updates)
+        elif order == 2:
+            local.sort(key=lambda a: not a.enabled)
+        elif order == 3:
+            local.sort(key=lambda a: (self.mgr.db.addons.get(a.name) or {}).get("published", ""), reverse=True)
+        return local
 
     def refresh_browse(self) -> None:
         if self.registry is None:
@@ -1157,20 +1422,35 @@ class MainWindow(QMainWindow):
         if tag and tag != "All tags":
             hits = [a for a in hits if tag in a.tags]
         installed = {a.name for a in self.mgr.local()} if self.mgr else set()
+        known = {a.name: github.cached_release(a.repo) for a in hits}  # from the cache only: no lookups
+        order = self.browse_sort.currentIndex()
+        if order == 1:
+            hits.sort(key=lambda a: known[a.name].published if known[a.name] else "", reverse=True)
+        elif order == 2:
+            hits.sort(key=lambda a: (known[a.name].downloads or 0) if known[a.name] else -1, reverse=True)
         self.browse.setRowCount(len(hits))
         for row, a in enumerate(hits):
-            self.browse.setItem(row, 0, _item(a.alias, f"{a.name}\nhttps://github.com/{a.repo}"))
+            name_item = _item(a.alias, f"{a.name}\nhttps://github.com/{a.repo}")
+            name_item.setData(Qt.UserRole, a.name)
+            self.browse.setItem(row, 0, name_item)
             self.browse.setItem(row, 1, _item(a.author))
             self.browse.setItem(row, 2, _item(", ".join(a.tags)))
+            rel = known[a.name]
+            if rel:
+                when = _item(_date(rel.published), f"{rel.version}" + (
+                    f", {rel.downloads:,} downloads" if rel.downloads is not None else ""))
+            else:
+                when = _item("", "Not looked up yet: press Get release dates")
+            self.browse.setItem(row, 3, when)
             needs = f"\nNeeds: {', '.join(a.dependencies)}" if a.dependencies else ""
-            self.browse.setItem(row, 3, _item(a.description, a.description + needs))
+            self.browse.setItem(row, 4, _item(a.description, a.description + needs))
             cell = QWidget()
             cl = QHBoxLayout(cell)
             cl.setContentsMargins(4, 2, 4, 2)
             btn = _button("Installed" if a.name in installed else "Install", lambda _=False, addon=a: self.add(addon))
             btn.setEnabled(a.name not in installed)
             cl.addWidget(btn)
-            self.browse.setCellWidget(row, 4, cell)
+            self.browse.setCellWidget(row, 5, cell)
 
     # actions
 
@@ -1196,6 +1476,10 @@ class MainWindow(QMainWindow):
             self.refresh_installed()
             n = len(updates)
             self.statusBar().showMessage(f"{n} update{'s' if n != 1 else ''} available" if n else "Everything is up to date", 6000)
+            if n and not self.started_updates and self.settings.get("update_on_start") and not paths.game_running():
+                self.started_updates = True
+                self.update(sorted(updates))
+            self.started_updates = True
 
         self.run("Checking for updates…", lambda: mgr.check_updates(reg), found)
 
@@ -1220,6 +1504,7 @@ class MainWindow(QMainWindow):
         mgr, reg, pending = self.mgr, self.registry, dict(self.updates)
 
         def work() -> list[str]:
+            backup.create(mgr.install, auto=True)  # settings and addons.txt, in case an update goes wrong
             done = []
             for name in names:
                 addon = mgr.addon_for(reg, name)
@@ -1239,7 +1524,62 @@ class MainWindow(QMainWindow):
         self.run("Updating…", work, finished, (lambda _msg: then()) if then else None)
 
     def update_all(self) -> None:
-        self.update(sorted(self.updates))
+        if not self.updates:
+            return
+        if UpdateDialog(self, dict(self.updates)).exec() == QDialog.Accepted:
+            self.update(sorted(self.updates))
+
+    def show_addon(self, name: str | None, show_new: bool = False) -> None:
+        if name:
+            AddonDialog(self, name, show_new=show_new).exec()
+
+    def show_backups(self) -> None:
+        if self.mgr is None:
+            self.choose_folder()
+            return
+        BackupsDialog(self).exec()
+
+    def roll_back(self, name: str) -> None:
+        if not self._guard():
+            return
+        try:
+            version = self.mgr.roll_back(name)
+        except installer.InstallError as e:
+            QMessageBox.warning(self, APP_NAME, str(e))
+            return
+        self.updates.pop(name, None)
+        self.refresh_installed()
+        self.statusBar().showMessage(f"Rolled {name} back to {version}; its settings were kept", 6000)
+
+    def load_dates(self) -> None:
+        if self.registry is None:
+            return
+        addons = list(self.registry.addons.values())
+        if not github.token() and len(addons) > 40:
+            answer = QMessageBox.question(
+                self, APP_NAME, f"This looks up {len(addons)} addons on GitHub, which allows 60 lookups an hour "
+                "without a token, so it may use up the limit for updates. Add a token in Setup to avoid that.\n\n"
+                "Look them up anyway?")
+            if answer != QMessageBox.Yes:
+                return
+
+        def work() -> int:
+            n = 0
+            for a in addons:
+                try:
+                    github.latest_release(a.repo, a.branch)
+                    n += 1
+                except (github.RateLimited, github.Offline):
+                    raise
+                except github.GitHubError:
+                    continue
+            return n
+
+        def done(n: int) -> None:
+            self.refresh_browse()
+            self.statusBar().showMessage(f"Release dates for {n} addons", 5000)
+
+        self.run("Looking up release dates…", work, done, lambda _m: self.refresh_browse())
 
     def toggle(self, name: str, on: bool) -> None:
         if not self._guard():
@@ -1320,7 +1660,8 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage("Official launcher started. Log in and press Play there.")
             self._game("The official launcher is open.", "Log in and press Play there.", "Starting…")
 
-        if self.updates and self.mgr is not None and not paths.game_running():
+        if self.updates and self.mgr is not None and self.settings.get("update_before_play", True) \
+                and not paths.game_running():
             self._game("Updating your addons…", "", "Updating…")
             self.update(list(self.updates), then=start)
         else:
@@ -1419,9 +1760,12 @@ def main(argv: list[str] | None = None) -> int:
     app.setApplicationName(APP_NAME)
     app.setApplicationVersion(__version__)
     app.setDesktopFileName("aac-linux-launcher")
-    icon = Path(__file__).with_name("icon.png")
-    if icon.exists():
-        app.setWindowIcon(QIcon(str(icon)))
+    icon = QIcon()
+    for png in sorted(Path(__file__).with_name("icons").glob("*.png")):
+        icon.addFile(str(png))
+    if icon.isNull() and Path(__file__).with_name("icon.png").exists():
+        icon = QIcon(str(Path(__file__).with_name("icon.png")))
+    app.setWindowIcon(icon)
     theme.apply(app)
     logs.setup("aacam-gui")
     win = MainWindow()

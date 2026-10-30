@@ -11,7 +11,7 @@ import textwrap
 import time
 from pathlib import Path
 
-from . import __version__, crash, github, installer, logs, net, official, paths, report, syscheck, wine
+from . import __version__, backup, crash, github, installer, logs, net, official, paths, report, syscheck, wine
 from .config import Settings
 from .core import Manager, NotFound
 from .registry import Registry
@@ -190,6 +190,9 @@ def cmd_update(args, settings):
             print(f"{name}: could not check, {mgr.check_errors[name]}")
         elif name in mgr.db.addons and name not in pending:
             print(f"{name} is up to date ({mgr.db.addons[name]['version']})")
+    if pending and not args.check:
+        snap = backup.create(mgr.install, auto=True)
+        print(f"Backed up addon settings and addons.txt to {snap.path.name} (`aacam backup --list`)")
     for name, release in pending.items():
         if args.check:
             print(f"{name}: {mgr.db.addons[name]['version']} -> {release.version}")
@@ -198,6 +201,83 @@ def cmd_update(args, settings):
         print(f"Updated {name} to {release.version}")
     if not args.check:
         print(f"{len(pending)} updated")
+
+
+def _date(iso: str) -> str:
+    return iso[:10] if iso else ""
+
+
+def print_notes(rel: github.Release, indent: str = "    ") -> None:
+    print(f"{rel.version}  {_date(rel.published)}")
+    if rel.notes:
+        print(textwrap.indent(rel.notes.strip()[:2000], indent))
+
+
+def cmd_changes(args, settings):
+    mgr = manager(settings)
+    reg = Registry.load()
+    try:
+        notes = mgr.changelog(reg, args.name, args.limit)
+    except NotFound:
+        raise CliError(f"no addon named {args.name}") from None
+    installed = (mgr.db.addons.get(args.name) or {}).get("version")
+    if not notes:
+        print(f"{args.name} {installed or ''} is the latest.".replace("  ", " "))
+        return
+    print(f"What's new in {args.name} since {installed}:\n" if installed else f"Recent releases of {args.name}:\n")
+    for rel in notes:
+        print_notes(rel)
+        print()
+
+
+def cmd_rollback(args, settings):
+    guard_not_running(args)
+    mgr = manager(settings)
+    for name in args.names:
+        if name not in mgr.db.addons:
+            raise CliError(f"{name} wasn't installed by aacam, so there is nothing to roll back to")
+        print(f"Rolled {name} back to {mgr.roll_back(name)} (settings kept). `aacam update {name}` goes forward again.")
+
+
+def cmd_backup(args, settings):
+    inst = current_install(settings)
+    snaps = backup.list_backups(inst)
+    if args.list:
+        if not snaps:
+            print("No backups yet. Make one with `aacam backup`; one is made before every update too.")
+        for i, b in enumerate(snaps, 1):
+            has_txt, addons = backup.contents(b)
+            print(f"[{i}] {b.label}  {len(addons)} addon(s){', addons.txt' if has_txt else ''}")
+        return
+    if args.restore:
+        guard_not_running(args)
+        pick = args.restore
+        chosen = snaps[int(pick) - 1] if pick.isdigit() and 0 < int(pick) <= len(snaps) else \
+            next((b for b in snaps if b.path.name == pick or b.path.stem == pick), None)
+        if chosen is None:
+            raise CliError(f"no backup {pick}; see `aacam backup --list`")
+        safety = backup.restore(inst, chosen)
+        print(f"Restored {chosen.label}. What was there before is saved as {safety.path.name}.")
+        return
+    b = backup.create(inst)
+    has_txt, addons = backup.contents(b)
+    print(f"Backed up settings of {len(addons)} addon(s){' and addons.txt' if has_txt else ''} to {b.path}")
+
+
+OPTIONS = {
+    "update-on-start": ("update_on_start", False, "update addons when the app starts"),
+    "update-before-play": ("update_before_play", True, "update addons when you press Play"),
+}
+
+
+def cmd_options(args, settings):
+    for opt in args.set or []:
+        key, _, value = opt.partition("=")
+        if key not in OPTIONS or value not in ("on", "off"):
+            raise CliError(f"use NAME=on or NAME=off with NAME one of: {', '.join(OPTIONS)}")
+        settings.set(OPTIONS[key][0], value == "on")
+    for key, (setting, default, help_) in OPTIONS.items():
+        print(f"{key:<20} {'on ' if settings.get(setting, default) else 'off'}  {help_}")
 
 
 def cmd_enable(args, settings):
@@ -247,9 +327,14 @@ def cmd_launch(args, settings):
             "  aacam launcher --download\n"
             "or point at it with `aacam launcher --set /path/to/launcher.AppImage`"
         )
-    if args.update_first:
+    if args.update_first or (settings.get("update_before_play", True) and Manager.from_settings(settings)):
         args.names, args.check, args.force = [], False, False
-        cmd_update(args, settings)
+        try:
+            cmd_update(args, settings)
+        except (github.GitHubError, installer.InstallError) as e:
+            if args.update_first:
+                raise
+            print(f"Skipped updating addons: {e}")
     extra = crash.launch_env(settings)
     if command:
         subprocess.Popen(["sh", "-c", command], start_new_session=True, env=official.environment(True, extra=extra))
@@ -454,6 +539,15 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--version", default=official.DEFAULT_VERSION, help="launcher version to download")
     sp = add("report", cmd_report, "print a report of your setup and recent log to share when asking for help")
     sp.add_argument("--log", type=int, default=80, metavar="N", help="lines of the launcher's log to include (default 80)")
+    sp = add("changes", cmd_changes, "show release notes: what's new since the installed version")
+    sp.add_argument("name")
+    sp.add_argument("--limit", type=int, default=10, help="releases to look at (default 10)")
+    add("rollback", cmd_rollback, "go back to the version installed before the last update", names="+", force=True)
+    sp = add("backup", cmd_backup, "back up addon settings and addons.txt (--list, --restore N)", force=True)
+    sp.add_argument("--list", action="store_true", help="list backups, newest first")
+    sp.add_argument("--restore", metavar="N", help="restore backup N from --list (a backup of now is made first)")
+    sp = add("options", cmd_options, "show or change launcher options, e.g. update-on-start=on")
+    sp.add_argument("set", nargs="*", metavar="NAME=on|off")
     sp = add("track", cmd_track, "start updating addons that were installed by hand or by another manager",
              names="*", force=True)
     sp.add_argument("--all", action="store_true", help="track every one that matches the catalogue")

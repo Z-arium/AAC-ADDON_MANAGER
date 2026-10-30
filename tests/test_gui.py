@@ -44,6 +44,7 @@ class GuiFlowTests(TempHome):
                               side_effect=lambda url, dest: make_zip(dest, {"r/main.lua": url})),
             mock.patch.object(paths, "game_running", return_value=False),
             mock.patch.object(gui.QMessageBox, "question", return_value=QMessageBox.Yes),
+            mock.patch.object(gui.UpdateDialog, "exec", return_value=gui.QDialog.Accepted),
         ]
         for p in patches:
             p.start()
@@ -117,6 +118,38 @@ class GuiFlowTests(TempHome):
         self.assertIn("5000 of 5000", panel.token_label.text())
         panel.clear_token()
         self.assertIsNone(config.Settings().get("github_token"))
+
+    def test_details_backups_rollback_and_filters(self):
+        self.win.load_registry()
+        self.wait()
+        self.win.add(self.reg.addons["Lib"])
+        self.wait()
+        self.versions["o/lib"] = "v2"
+        self.win.check_updates()
+        self.wait()
+        self.win.update(["Lib"])
+        self.wait()
+        notes = [github.Release("v2", "u", notes="**Faster**", published="2026-10-30T00:00:00Z")]
+        with mock.patch.object(github, "releases", return_value=notes):
+            dialog = gui.AddonDialog(self.win, "Lib")
+            self.wait()
+        self.assertIn("Faster", dialog.notes.toPlainText())
+        labels = [b.text() for b in dialog.findChildren(gui.QPushButton)]
+        self.assertIn("Roll back to v1", labels)
+        self.win.roll_back("Lib")
+        self.assertEqual(self.win.mgr.db.addons["Lib"]["version"], "v1")
+
+        backups = gui.BackupsDialog(self.win)
+        self.assertGreaterEqual(backups.list.count(), 1)  # the automatic one before the update
+        backups.make()
+        self.assertGreaterEqual(backups.list.count(), 2)
+
+        self.win.addon_filter.setCurrentIndex(1)  # enabled only
+        names = {self.win.installed.item(r, 1).data(gui.Qt.UserRole) for r in range(self.win.installed.rowCount())}
+        self.assertEqual(names, {"Lib"})
+        self.win.addon_filter.setCurrentIndex(0)
+        self.win.browse_sort.setCurrentIndex(1)
+        self.assertEqual(self.win.browse.rowCount(), 2)
 
     def test_copy_diagnostics(self):
         self.win.copy_report()

@@ -27,8 +27,12 @@ echo "Installed aacam to $bindir/aacam"
 
 if [ "$gui" = 1 ]; then
   ln -sf "$venv/bin/aacam-gui" "$bindir/aacam-gui"
-  mkdir -p "$data/applications" "$data/icons/hicolor/256x256/apps"
-  cp "$here/src/aacam/icon.png" "$data/icons/hicolor/256x256/apps/aac-linux-launcher.png"
+  mkdir -p "$data/applications"
+  for png in "$here"/src/aacam/icons/*.png; do
+    size=$(basename "$png" .png)
+    mkdir -p "$data/icons/hicolor/${size}x${size}/apps"
+    cp "$png" "$data/icons/hicolor/${size}x${size}/apps/aac-linux-launcher.png"
+  done
   rm -f "$data/applications/aac-addon-manager.desktop" "$data/icons/hicolor/256x256/apps/aac-addon-manager.png"  # old name
   sed "s|^Exec=.*|Exec=$bindir/aacam-gui|" "$here/packaging/aac-linux-launcher.desktop" \
     > "$data/applications/aac-linux-launcher.desktop"

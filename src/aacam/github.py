@@ -200,6 +200,23 @@ class Release:
     version: str  # release tag, or "<branch>@<short sha>" when the addon has no releases
     zip_url: str
     commit: str | None = None
+    notes: str = ""  # release notes, or the commit message for addons without releases
+    published: str = ""  # ISO 8601 date
+    downloads: int | None = None  # downloads of the release's attached files, when it has any
+
+
+def _from_release(repo: str, data: dict) -> Release:
+    tag = data["tag_name"]
+    assets = data.get("assets") or []
+    return Release(
+        tag,
+        # Name the tag explicitly: the API's zipball_url answers 300 when a tag
+        # shares its name with a branch (one addon tags its releases "main").
+        f"https://codeload.github.com/{repo}/zip/refs/tags/{urllib.parse.quote(tag)}",
+        notes=(data.get("body") or "").strip(),
+        published=data.get("published_at") or "",
+        downloads=sum(a.get("download_count", 0) for a in assets) if assets else None,
+    )
 
 
 def latest_release(repo: str, branch: str) -> Release:
@@ -207,10 +224,7 @@ def latest_release(repo: str, branch: str) -> Release:
     try:
         data = get_json(f"{API}/repos/{repo}/releases/latest")
         assert isinstance(data, dict)
-        tag = data["tag_name"]
-        # Name the tag explicitly: the API's zipball_url answers 300 when a tag
-        # shares its name with a branch (one addon tags its releases "main").
-        return Release(tag, f"https://codeload.github.com/{repo}/zip/refs/tags/{urllib.parse.quote(tag)}")
+        return _from_release(repo, data)
     except GitHubError as e:
         if "returned 404" not in str(e):
             raise
@@ -223,4 +237,34 @@ def latest_release(repo: str, branch: str) -> Release:
         raise
     assert isinstance(data, dict)
     sha = data["sha"]
-    return Release(f"{branch}@{sha[:7]}", f"https://codeload.github.com/{repo}/zip/{sha}", sha)
+    commit = data.get("commit") or {}
+    return Release(f"{branch}@{sha[:7]}", f"https://codeload.github.com/{repo}/zip/{sha}", sha,
+                   notes=(commit.get("message") or "").strip(),
+                   published=(commit.get("committer") or {}).get("date") or "")
+
+
+def releases(repo: str, branch: str, limit: int = 10) -> list[Release]:
+    """Newest first: published releases, or recent commits for addons without releases. One API call."""
+    data = get_json(f"{API}/repos/{repo}/releases?per_page={limit}")
+    assert isinstance(data, list)
+    out = [_from_release(repo, d) for d in data if not d.get("draft") and not d.get("prerelease")]
+    if out or data:
+        return out
+    commits = get_json(f"{API}/repos/{repo}/commits?sha={urllib.parse.quote(branch)}&per_page={limit}")
+    assert isinstance(commits, list)
+    return [Release(f"{branch}@{c['sha'][:7]}", f"https://codeload.github.com/{repo}/zip/{c['sha']}", c["sha"],
+                    notes=(c.get("commit", {}).get("message") or "").strip(),
+                    published=(c.get("commit", {}).get("committer") or {}).get("date") or "")
+            for c in commits]
+
+
+def cached_release(repo: str) -> Release | None:
+    """The latest release from the cache only, without asking GitHub (for lists of many addons)."""
+    with _lock:
+        entry = _cache_load().get(f"{API}/repos/{repo}/releases/latest")
+    if not entry or entry.get("status") != 200:
+        return None
+    try:
+        return _from_release(repo, entry["body"])
+    except (KeyError, TypeError):
+        return None
