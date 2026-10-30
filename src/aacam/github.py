@@ -10,7 +10,7 @@ import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 
-from . import __version__
+from . import __version__, net
 
 API = "https://api.github.com"
 USER_AGENT = f"aacam/{__version__}"
@@ -30,7 +30,7 @@ def _request(url: str, accept: str = "application/vnd.github+json") -> urllib.re
 
 def get_json(url: str) -> object:
     try:
-        with urllib.request.urlopen(_request(url), timeout=30) as resp:
+        with net.urlopen(_request(url), timeout=30) as resp:
             return json.load(resp)
     except urllib.error.HTTPError as e:
         if e.code == 403 and e.headers.get("X-RateLimit-Remaining") == "0":
@@ -43,7 +43,7 @@ def get_json(url: str) -> object:
 def download(url: str, dest: Path) -> Path:
     dest.parent.mkdir(parents=True, exist_ok=True)
     try:
-        with urllib.request.urlopen(_request(url, accept="*/*"), timeout=120) as resp, open(dest, "wb") as f:
+        with net.urlopen(_request(url, accept="*/*"), timeout=120) as resp, open(dest, "wb") as f:
             while chunk := resp.read(1 << 16):
                 f.write(chunk)
     except urllib.error.HTTPError as e:

@@ -17,7 +17,7 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-from . import __version__
+from . import __version__, net
 from .config import data_dir
 
 LAUNCHER = "launcher"  # setting value: let the official launcher choose
@@ -146,7 +146,7 @@ def download_wow64(dest: Path | None = None, url: str = WOW64_URL, sha256: str =
         archive = Path(tmp) / "wine.tar.xz"
         digest = hashlib.sha256()
         try:
-            with urllib.request.urlopen(req, timeout=300) as resp, open(archive, "wb") as out:
+            with net.urlopen(req, timeout=300) as resp, open(archive, "wb") as out:
                 while chunk := resp.read(1 << 20):
                     digest.update(chunk)
                     out.write(chunk)
