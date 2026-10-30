@@ -80,6 +80,8 @@ In v0.2.5: a new look. The window opens on a Play screen with painted art, a big
 
 In v0.2.6: a live memory meter. While the game runs, the status bar shows how much of its 4 GB it uses against the 3.85 GB where sessions crashed (green, amber from 3.7, red at the line), and `aacam watch` prints the same in a terminal. It measures the address space below 4 GB from the ranges Linux lists for the process, so it also works under WoW64 Wine, where the old VmSize figure counted the 64-bit side.
 
+In v0.2.7: diagnostics no longer trace every Wine exception (+seh), which wrote 11 MB of log in under three minutes and cost FPS. Quitting from the game's menu is no longer reported as a crash, and a Wine build is no longer mistaken for Proton because of our own PROTON_* switches. First WoW64 test (2026-10-30): no anti-cheat kick, the game reached the world on DXVK and the NVIDIA card.
+
 Next:
 
 - Switch on the DXVK memory setting and WoW64 Wine once the ArcheAge Classic team OKs them, and repair the game's prefix.

@@ -74,6 +74,11 @@ class SamplerTests(TempHome):
         self.assertEqual(s.peak["VmPeak"], 3 * GiB)
         self.assertEqual(s.game["env"]["WINEPREFIX"], "/pfx")
 
+        start = dict(snap, cmdline=["C:\\windows\\system32\\start.exe", "/exec", "bin32/archeage.exe"], VmSize=1)
+        with mock.patch.object(crash, "snapshot", return_value=start):
+            s.sample(pids=lambda: [99])
+        self.assertEqual(s.game["cmdline"][0], "C:\\AAClassic\\bin32\\archeage.exe")
+
     def test_watch_feeds_sampler(self):
         sampler = mock.Mock()
         running = [True]
@@ -259,6 +264,19 @@ class WineTests(TempHome):
         game = {"pid": 1, "exe": "/home/x/Proton 11.0/files/bin/wine-preloader", "env": {crash.MARKER: "1"}}
         found = crash.analyze({}, crash.Sampler(game=game), Settings(), [], played=60)
         self.assertIn("proton_anticheat", {f.key for f in found})
+
+    def test_wine_with_our_proton_switches_is_not_proton(self):
+        game = {"pid": 1, "exe": "/home/x/.local/share/aacam/wine/wine-11.0-staging-amd64-wow64/lib/wine/"
+                "x86_64-unix/wine-preloader", "env": {crash.MARKER: "1", "PROTON_NO_ESYNC": "1"}}
+        found = crash.analyze({}, crash.Sampler(game=game), Settings(), [], played=160)
+        self.assertNotIn("proton_anticheat", {f.key for f in found})
+
+    def test_quit_from_the_menu_is_not_a_crash(self):
+        game = {"pid": 1, "exe": "/x/Proton 11.0/files/bin/wine-preloader", "env": {crash.MARKER: "1"}}
+        log = {"logs/ArcheAge.log": "<23:01:44> [584C4FFD] [net] -- Client will disconnect; cause=18 desc=graceful exit\n"
+                                    "<23:01:44> [05D024BA] System:Quit\n"}
+        found = crash.analyze(log, crash.Sampler(game=game), Settings(), [], played=20)
+        self.assertFalse(crash.crashed(found))
 
 
 class MemoryWarningTests(TempHome):
