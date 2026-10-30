@@ -80,6 +80,8 @@ In v0.2.5: a new look. The window opens on a Play screen with painted art, a big
 
 In v0.2.6: a live memory meter. While the game runs, the status bar shows how much of its 4 GB it uses against the 3.85 GB where sessions crashed (green, amber from 3.7, red at the line), and `aacam watch` prints the same in a terminal. It measures the address space below 4 GB from the ranges Linux lists for the process, so it also works under WoW64 Wine, where the old VmSize figure counted the 64-bit side.
 
+In v0.2.7: v0.2.5's look read as generic (Jacob, 2026-10-30), so it was replaced. The window now uses the desktop's own colours, and the Play tab shows the player's own in-game screenshot instead of drawn art.
+
 Next:
 
 - Switch on the DXVK memory setting and WoW64 Wine once the ArcheAge Classic team OKs them, and repair the game's prefix.
