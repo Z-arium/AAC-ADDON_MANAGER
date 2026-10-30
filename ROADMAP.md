@@ -76,6 +76,8 @@ In v0.2.3: a player can opt in to test WoW64 Wine on their own PC before the tea
 
 In v0.2.4: HTTPS works from the AppImage on Arch (it couldn't find Arch's CA certificates, so addon updates and downloads said "could not reach GitHub"); `aacam doctor --network` checks it, and CI runs that on Arch.
 
+In v0.2.5: a new look. The window opens on a Play screen with painted art, a big Play button and status tiles, and has a sidebar for My Addons, Get Addons, Crash fixes and Setup, in a dark and gold theme that looks the same on KDE and GNOME.
+
 Next:
 
 - Switch on the DXVK memory setting and WoW64 Wine once the ArcheAge Classic team OKs them, and repair the game's prefix.
