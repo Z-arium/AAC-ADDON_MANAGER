@@ -1,4 +1,4 @@
-"""The desktop app's look: the desktop's own colours, and the player's own screenshot as the header.
+"""The desktop app's look: the desktop's own colours, and the player's own screenshot on the Play tab.
 
 The AppImage ships its own Qt, which can't load KDE's or GNOME's style plugins, so we read the
 desktop's colour scheme ourselves (KDE's kdeglobals, GNOME's dark-style setting) and apply it to
@@ -207,14 +207,18 @@ def latest_screenshot(root: Path | None) -> Path | None:
     return best[1] if best else None
 
 
-class Header(QWidget):
-    """The top of the window: the player's own latest screenshot when there is one, else nothing."""
+class Showcase(QWidget):
+    """The Play tab's background: the player's own screenshot, shaded at the bottom for the text."""
 
     def __init__(self) -> None:
         super().__init__()
         self.picture: QPixmap | None = None
+        self.path: Path | None = None
 
     def set_picture(self, path: Path | None) -> None:
+        if path == self.path:
+            return
+        self.path = path
         pix = QPixmap(str(path)) if path else QPixmap()
         self.picture = None if pix.isNull() else pix
         self.update()
@@ -227,19 +231,17 @@ class Header(QWidget):
         p = QPainter(self)
         w, h = self.width(), self.height()
         if self.picture is None:
-            p.fillRect(self.rect(), self.palette().window())
-            p.setPen(self.palette().mid().color())
-            p.drawLine(0, h - 1, w, h - 1)
+            p.fillRect(self.rect(), self.palette().base())
             return
         p.setRenderHint(QPainter.SmoothPixmapTransform)
         pw, ph = self.picture.width(), self.picture.height()
         scale = max(w / pw, h / ph)
         sw, sh = w / scale, h / scale
-        p.drawPixmap(QRectF(0, 0, w, h), self.picture, QRectF((pw - sw) / 2, (ph - sh) * 0.4, sw, sh))
-        shade = QLinearGradient(0, 0, 0, h)
-        shade.setColorAt(0, QColor(0, 0, 0, 40))
-        shade.setColorAt(1, QColor(0, 0, 0, 170))
-        p.fillRect(self.rect(), shade)
+        p.drawPixmap(QRectF(0, 0, w, h), self.picture, QRectF((pw - sw) / 2, (ph - sh) / 2, sw, sh))
+        shade = QLinearGradient(0, h * 0.45, 0, h)
+        shade.setColorAt(0, QColor(0, 0, 0, 0))
+        shade.setColorAt(1, QColor(0, 0, 0, 200))
+        p.fillRect(QRectF(0, h * 0.45, w, h * 0.55), shade)
 
 
 def title_font(base: QFont, points: float, bold: bool = True) -> QFont:

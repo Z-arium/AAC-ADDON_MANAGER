@@ -482,7 +482,7 @@ class FixesDialog(QDialog):
 # --- main window --------------------------------------------------------------
 
 class MainWindow(QMainWindow):
-    ADDONS, BROWSE, FIXES, SETUP = range(4)
+    PLAY, ADDONS, BROWSE, FIXES, SETUP = range(5)
 
     def __init__(self) -> None:
         super().__init__()
@@ -507,9 +507,9 @@ class MainWindow(QMainWindow):
         lay = QVBoxLayout(central)
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(0)
-        lay.addWidget(self._build_header())
         self.tabs = QTabWidget()
         self.tabs.setDocumentMode(True)
+        self.tabs.addTab(self._build_play_tab(), "Play")
         self.tabs.addTab(self._build_installed_tab(), "My Addons")
         self.tabs.addTab(self._build_browse_tab(), "Get Addons")
         self.tabs.addTab(self._build_fixes_tab(), "Crash fixes")
@@ -528,38 +528,78 @@ class MainWindow(QMainWindow):
 
     # layout
 
-    def _build_header(self) -> QWidget:
-        self.header = theme.Header()
-        row = QHBoxLayout(self.header)
-        row.setContentsMargins(20, 16, 20, 16)
-        row.setSpacing(20)
+    def _build_play_tab(self) -> QWidget:
+        """Your own screenshot, full size, with the game's name, what it's doing and the Play button."""
+        self.showcase = theme.Showcase()
+        lay = QVBoxLayout(self.showcase)
+        lay.setContentsMargins(28, 18, 28, 26)
+        top = QHBoxLayout()
+        top.addStretch()
+        self.picture_btn = _button("Change picture…", self.choose_picture,
+                                   "Pick one of your screenshots. Hide the game's interface before you take one.")
+        self.picture_btn.setStyleSheet(
+            "QPushButton { background: rgba(0,0,0,110); color: white; border: 1px solid rgba(255,255,255,60);"
+            " border-radius: 4px; padding: 4px 12px; } QPushButton:hover { background: rgba(0,0,0,160); }")
+        top.addWidget(self.picture_btn)
+        lay.addLayout(top)
+        lay.addStretch(1)
+        self.no_picture = QWidget()
+        hint = QVBoxLayout(self.no_picture)
+        hint.setAlignment(Qt.AlignCenter)
+        msg = _label("Your own ArcheAge screenshots show here. Hide the game's interface, then press "
+                     "Print Screen; the game saves them in Documents/AAClassic/ScreenShots.", muted=True)
+        msg.setAlignment(Qt.AlignCenter)
+        msg.setFixedWidth(460)
+        msg.setMinimumHeight(msg.heightForWidth(460))
+        hint.addWidget(msg, 0, Qt.AlignCenter)
+        hint.addWidget(_button("Choose a picture…", self.choose_picture), 0, Qt.AlignCenter)
+        lay.addWidget(self.no_picture)
+        lay.addStretch(1)
+
+        row = QHBoxLayout()
+        row.setSpacing(24)
         words = QVBoxLayout()
         words.setSpacing(4)
-        words.addStretch()
         self.title = QLabel("ArcheAge Classic")
-        self.title.setFont(theme.title_font(self.font(), self.font().pointSizeF() * 1.7))
+        self.title.setFont(theme.title_font(self.font(), self.font().pointSizeF() * 2.2))
         words.addWidget(self.title)
         self.state = QLabel()
-        self.state.setTextFormat(Qt.RichText)
+        self.state.setWordWrap(True)
         words.addWidget(self.state)
         self.facts = QLabel()
-        self.facts.setTextFormat(Qt.RichText)
         self.facts.setWordWrap(True)
         words.addWidget(self.facts)
         row.addLayout(words, 1)
         self.play_btn = _button("Play", self.play, "Update addons, then start the game through the official launcher")
-        self.play_btn.setFont(theme.title_font(self.font(), self.font().pointSizeF() * 1.25))
-        self.play_btn.setMinimumSize(150, 46)
+        self.play_btn.setFont(theme.title_font(self.font(), self.font().pointSizeF() * 1.4))
+        self.play_btn.setMinimumSize(180, 54)
         accent, text = theme.colour("selection"), theme.colour("selection_text")
         self.play_btn.setStyleSheet(
             f"QPushButton {{ background: {accent.name()}; color: {text.name()}; border: 1px solid {accent.darker(130).name()};"
-            f" border-radius: 4px; padding: 0 28px; }}"
+            f" border-radius: 4px; padding: 0 32px; }}"
             f" QPushButton:hover {{ background: {accent.lighter(110).name()}; }}"
             f" QPushButton:pressed {{ background: {accent.darker(115).name()}; }}"
             f" QPushButton:disabled {{ background: {theme.mix(accent, theme.colour('window'), 0.6).name()};"
             f" color: {theme.mix(text, theme.colour('window'), 0.4).name()}; }}")
         row.addWidget(self.play_btn, 0, Qt.AlignBottom)
-        return self.header
+        lay.addLayout(row)
+        return self.showcase
+
+    def picture(self) -> Path | None:
+        """The screenshot the player chose, else their newest one."""
+        chosen = self.settings.get("picture")
+        if chosen and Path(chosen).is_file():
+            return Path(chosen)
+        return theme.latest_screenshot(self.mgr.install.root if self.mgr else None)
+
+    def choose_picture(self) -> None:
+        current = self.picture()
+        start = current.parent if current else (self.mgr.install.root if self.mgr else Path.home())
+        chosen, _ = QFileDialog.getOpenFileName(self, "Choose a picture", str(start),
+                                                "Pictures (*.jpg *.jpeg *.png *.bmp)")
+        if chosen:
+            self.settings.set("picture", chosen)
+            self.refresh_header()
 
     def _build_installed_tab(self) -> QWidget:
         w, lay = _tab()
@@ -742,7 +782,7 @@ class MainWindow(QMainWindow):
         self.pool.start(job)
 
     def check_system(self) -> None:
-        """Run the driver checks off the UI thread for the header."""
+        """Run the driver checks off the UI thread for the Play tab."""
         def show(checks: list[syscheck.Check]) -> None:
             self.checks = checks
             self.refresh_header()
@@ -754,14 +794,15 @@ class MainWindow(QMainWindow):
         self.pool.start(job)
 
     def refresh_header(self) -> None:
-        """The header: the player's latest screenshot, what the game is doing, and one line of facts."""
-        self.header.set_picture(theme.latest_screenshot(self.mgr.install.root if self.mgr else None))
-        on_picture = self.header.on_picture
-        self.header.setMinimumHeight(190 if on_picture else 0)
+        """The Play tab: the player's screenshot, what the game is doing, and one line of facts."""
+        self.showcase.set_picture(self.picture())
+        on_picture = self.showcase.on_picture
+        self.no_picture.setVisible(not on_picture)
+        self.picture_btn.setVisible(on_picture)
         light = "color: white;" if on_picture else ""
         self.title.setStyleSheet(light)
         self.state.setStyleSheet(light)
-        self.facts.setStyleSheet("color: rgba(255,255,255,190);" if on_picture else "")
+        self.facts.setStyleSheet("color: rgba(255,255,255,200);" if on_picture else "")
         if not on_picture:
             _muted(self.facts)
 
@@ -962,7 +1003,7 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage("Report copied. Paste it where you ask for help.", 6000)
 
     def _game(self, state: str | None, detail: str = "", button: str | None = None) -> None:
-        """Show what the game is doing in the header; a button text disables Play while it lasts."""
+        """Show what the game is doing on the Play tab; a button text disables Play while it lasts."""
         self.game_state = (state, detail) if state else None
         self.play_btn.setText(button or "Play")
         self.play_btn.setEnabled(button is None)
