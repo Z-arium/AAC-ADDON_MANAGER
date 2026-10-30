@@ -52,9 +52,11 @@ def prefix_roots(home: Path | None = None) -> list[Path]:
     return roots
 
 
-def install_from_root(root: Path) -> Install:
-    """Pick the addon directory for an AAClassic folder, preferring one that exists."""
-    in_docs = root.parent.name.lower() in ("documents", "my documents")
+def install_from_root(root: Path, in_docs: bool | None = None) -> Install:
+    """Pick the addon directory for an AAClassic folder, preferring one that exists.
+    in_docs: the folder is in a Documents folder (whatever the desktop's language calls it)."""
+    if in_docs is None:
+        in_docs = root.parent.name.lower() in ("documents", "my documents")
     subdirs = DOCS_SUBDIRS if in_docs else INSTALL_SUBDIRS
     for sub in subdirs:
         candidate = root / sub
@@ -89,7 +91,7 @@ def detect(home: Path | None = None) -> list[Install]:
     candidates: list[Install] = []
     for docs in documents_dirs(home):
         if (docs / "AAClassic").is_dir():
-            candidates.append(install_from_root(docs / "AAClassic"))
+            candidates.append(install_from_root(docs / "AAClassic", in_docs=True))
     candidates.extend(_install_roots(home))
 
     unique: dict[Path, Install] = {}

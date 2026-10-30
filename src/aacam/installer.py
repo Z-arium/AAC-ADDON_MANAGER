@@ -67,21 +67,24 @@ def local_addons(install: Install) -> list[str]:
     )
 
 
-def _safe_extract(zf: zipfile.ZipFile, dest: Path) -> None:
+def _safe_extract(zf: zipfile.ZipFile, dest: Path, name: str) -> None:
     for info in zf.infolist():
         parts = PurePosixPath(info.filename.replace("\\", "/")).parts
         if info.filename.startswith(("/", "\\")) or ".." in parts:
-            raise InstallError(f"refusing unsafe path in archive: {info.filename}")
+            raise InstallError(f"refused {name}: its zip would write outside the addon folder ({info.filename})")
     zf.extractall(dest)
 
 
-def _release_root(extracted: Path) -> Path:
+def _release_root(extracted: Path, name: str) -> Path:
     """The one directory in the archive whose top level holds main.lua."""
     if (extracted / "main.lua").is_file():
         return extracted
     roots = [p for p in extracted.iterdir() if p.is_dir() and (p / "main.lua").is_file()]
-    if len(roots) != 1:
-        raise InstallError("archive must contain exactly one folder with main.lua at its top")
+    if not roots:
+        raise InstallError(f"{name} isn't an ArcheAge addon: its zip has no main.lua at the top or in one folder")
+    if len(roots) > 1:
+        raise InstallError(f"{name}'s zip holds {len(roots)} addons ({', '.join(sorted(p.name for p in roots))}); "
+                           "unpack it and import each folder's zip on its own")
     return roots[0]
 
 
@@ -93,10 +96,13 @@ def install_zip(install: Install, name: str, archive: Path) -> Path:
         tmp_path = Path(tmp)
         try:
             with zipfile.ZipFile(archive) as zf:
-                _safe_extract(zf, tmp_path / "x")
-        except zipfile.BadZipFile as e:
-            raise InstallError(f"not a valid zip archive: {archive}") from e
-        stage = _release_root(tmp_path / "x")
+                _safe_extract(zf, tmp_path / "x", name)
+        except (zipfile.BadZipFile, EOFError) as e:
+            raise InstallError(f"the zip for {name} is broken or incomplete ({archive.name}); "
+                               "try again, and tell the addon's author if it keeps happening") from e
+        except FileNotFoundError as e:
+            raise InstallError(f"no such file: {archive}") from e
+        stage = _release_root(tmp_path / "x", name)
         if (dest / DATA_DIR).is_dir():
             shutil.rmtree(stage / DATA_DIR, ignore_errors=True)
             shutil.copytree(dest / DATA_DIR, stage / DATA_DIR)

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import logging
 import os
 import subprocess
 import sys
@@ -10,7 +11,7 @@ import textwrap
 import time
 from pathlib import Path
 
-from . import __version__, crash, github, installer, net, official, paths, report, syscheck, wine
+from . import __version__, crash, github, installer, logs, net, official, paths, report, syscheck, wine
 from .config import Settings
 from .core import Manager, NotFound
 from .registry import Registry
@@ -72,6 +73,61 @@ def cmd_list(args, settings):
         print(f"{'enabled ' if a.enabled else 'disabled'}  {a.name:<32} {a.version}")
     for name in mgr.missing():
         print(f"missing   {name:<32} (in addons.txt but no folder)")
+    if any(not a.managed for a in local):
+        try:
+            loose = mgr.untracked(Registry.load())
+        except github.GitHubError:
+            return
+        if loose:
+            print(f"\n{len(loose)} addon(s) installed by hand match the catalogue: {', '.join(loose)}")
+            print("Track them for updates with: aacam track --all")
+
+
+def cmd_track(args, settings):
+    guard_not_running(args)
+    mgr = manager(settings)
+    loose = mgr.untracked(Registry.load())
+    names = sorted(loose) if args.all else args.names
+    if not names:
+        if loose:
+            print("Installed by hand and found in the catalogue:")
+            for name, addon in sorted(loose.items()):
+                print(f"  {name:<28} https://github.com/{addon.repo}")
+            print("\nTrack them with `aacam track --all` or `aacam track NAME`.")
+        else:
+            print("Nothing to track: every addon that is in the catalogue is already tracked.")
+        return
+    for name in names:
+        if name in mgr.db.addons:
+            print(f"{name} is already tracked")
+            continue
+        if name not in loose:
+            raise CliError(f"{name} isn't an installed addon that matches the catalogue")
+        mgr.track(name, loose[name])
+        print(f"Tracking {name} ({loose[name].repo}); `aacam update` brings it to the latest release")
+
+
+def cmd_token(args, settings):
+    if args.set is not None:
+        value = args.set.strip() or (sys.stdin.readline().strip() if not sys.stdin.isatty() else "")
+        if not value:
+            raise CliError("give the token: `aacam token --set TOKEN`, or pipe it in")
+        settings.set("github_token", value)
+        github.clear_cache()
+        print("Token saved.")
+    elif args.clear:
+        settings.set("github_token", None)
+        print("Token cleared.")
+    source = ("the GITHUB_TOKEN variable" if os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN")
+              else "your settings" if settings.get("github_token") else None)
+    print(f"Using a token from {source}." if source else "No token: GitHub allows 60 lookups an hour.")
+    try:
+        rate = github.rate_limit()
+    except github.GitHubError as e:
+        print(f"Could not check the limit: {e}")
+        return
+    reset = time.strftime("%H:%M", time.localtime(rate.get("reset", 0)))
+    print(f"{rate.get('remaining')} of {rate.get('limit')} GitHub lookups left this hour (resets at {reset}).")
 
 
 def cmd_search(args, settings):
@@ -130,7 +186,9 @@ def cmd_update(args, settings):
             print(f"skip {name}: not installed from the catalogue")
     pending = mgr.check_updates(reg, args.names or None)
     for name in args.names or sorted(mgr.db.addons):
-        if name in mgr.db.addons and name not in pending:
+        if name in mgr.check_errors:
+            print(f"{name}: could not check, {mgr.check_errors[name]}")
+        elif name in mgr.db.addons and name not in pending:
             print(f"{name} is up to date ({mgr.db.addons[name]['version']})")
     for name, release in pending.items():
         if args.check:
@@ -350,7 +408,7 @@ def cmd_watch(args, settings):
 
 
 def cmd_report(args, settings):
-    print(report.build(settings), end="")
+    print(report.build(settings, log_lines=args.log), end="")
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -394,7 +452,14 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--set", metavar="APPIMAGE", help="use this launcher AppImage")
     sp.add_argument("--download", action="store_true", help="download it from aa-classic.com")
     sp.add_argument("--version", default=official.DEFAULT_VERSION, help="launcher version to download")
-    add("report", cmd_report, "print a report of your setup to share when asking for help")
+    sp = add("report", cmd_report, "print a report of your setup and recent log to share when asking for help")
+    sp.add_argument("--log", type=int, default=80, metavar="N", help="lines of the launcher's log to include (default 80)")
+    sp = add("track", cmd_track, "start updating addons that were installed by hand or by another manager",
+             names="*", force=True)
+    sp.add_argument("--all", action="store_true", help="track every one that matches the catalogue")
+    sp = add("token", cmd_token, "save a GitHub token so updating many addons doesn't hit the 60 an hour limit")
+    sp.add_argument("--set", metavar="TOKEN", nargs="?", const="", help="save this token (or read it from stdin)")
+    sp.add_argument("--clear", action="store_true", help="forget the saved token")
     sp = add("fixes", cmd_fixes, "show or switch the crash fixes applied when the game starts")
     sp.add_argument("--on", action="append", metavar="FIX", help="turn a fix on (repeatable)")
     sp.add_argument("--off", action="append", metavar="FIX", help="turn a fix off (repeatable)")
@@ -423,13 +488,30 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    logs.setup(f"aacam {args.command}")
+    log = logging.getLogger("aacam.cli")
     try:
         args.fn(args, Settings())
     except (CliError, installer.InstallError, github.GitHubError, official.LauncherError, wine.WineError) as e:
+        log.error("%s: %s", args.command, e)
         print(f"error: {e}", file=sys.stderr)
+        return 1
+    except PermissionError as e:
+        log.error("%s: %s", args.command, e)
+        print(f"error: no permission to change {e.filename or 'a file'}; check who owns that folder", file=sys.stderr)
+        return 1
+    except OSError as e:
+        log.exception("%s failed", args.command)
+        print(f"error: {e.strerror or e}{f' ({e.filename})' if e.filename else ''}", file=sys.stderr)
         return 1
     except KeyboardInterrupt:
         return 130
+    except Exception:
+        log.exception("%s crashed", args.command)
+        print(f"error: unexpected failure, details are in {logs.path()}\n"
+              "Please report it with `aacam report` at https://github.com/Z-arium/AAC-ADDON_MANAGER/issues",
+              file=sys.stderr)
+        return 1
     return 0
 
 

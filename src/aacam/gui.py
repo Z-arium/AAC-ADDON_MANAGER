@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import shutil
 import subprocess
 import sys
@@ -41,13 +42,15 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from . import __version__, crash, github, installer, official, paths, report, syscheck, theme, wine
+from . import __version__, crash, github, installer, logs, official, paths, report, syscheck, theme, wine
 from .config import Settings
 from .core import Manager
 from .registry import Addon, Registry
 
 APP_NAME = "ArcheAge Classic Linux Launcher"
 APP_REPO = "Z-arium/AAC-ADDON_MANAGER"
+
+log = logging.getLogger("aacam.gui")
 
 
 def _newer(tag: str, current: str) -> bool:
@@ -78,9 +81,13 @@ class Job(QRunnable):
         try:
             result = self.fn()
         except (github.GitHubError, installer.InstallError, official.LauncherError, wine.WineError, OSError) as e:
+            log.error("%s", e)
             self.signals.failed.emit(str(e))
         except Exception:  # keep the window alive and show what went wrong
-            self.signals.failed.emit(traceback.format_exc(limit=3))
+            log.exception("unexpected error")
+            self.signals.failed.emit(
+                f"Something unexpected went wrong. The details are in {logs.path()}.\n\n"
+                "Setup > Copy diagnostics copies them for a bug report.\n\n" + traceback.format_exc(limit=1))
         else:
             self.signals.done.emit(result)
 
@@ -276,6 +283,27 @@ class SetupPanel(QWidget):
         form.addWidget(self.folder_label, 1)
         form.addWidget(_button("Change…", self.choose_folder))
         lay.addWidget(box)
+
+        box = QGroupBox("4. GitHub token (optional)")
+        form = QVBoxLayout(box)
+        form.addWidget(_label(
+            "Addon updates come from GitHub, which allows 60 lookups an hour without a token. With many "
+            "addons that runs out. A token raises it to 5,000: make one at github.com/settings/tokens "
+            "(a fine-grained token with no permissions is enough) and paste it here. It stays on this PC.",
+            muted=True))
+        row = QHBoxLayout()
+        self.token_edit = QLineEdit()
+        self.token_edit.setEchoMode(QLineEdit.Password)
+        self.token_edit.setPlaceholderText("github_pat_… or ghp_…")
+        row.addWidget(self.token_edit, 1)
+        row.addWidget(_button("Save", self.save_token))
+        self.clear_token_btn = _button("Clear", self.clear_token)
+        row.addWidget(self.clear_token_btn)
+        row.addWidget(_button("Check limit", self.check_limit, "Ask GitHub how many lookups are left this hour"))
+        form.addLayout(row)
+        self.token_label = _label(muted=True)
+        form.addWidget(self.token_label)
+        lay.addWidget(box)
         self.refresh()
 
     def refresh(self) -> None:
@@ -309,6 +337,11 @@ class SetupPanel(QWidget):
                 f"{_word('negative', 'Not found')}. Download it here, or choose the AppImage if you already have it."
             )
             self.download_btn.setText("Download it")
+        saved = bool(self.win.settings.get("github_token"))
+        self.token_label.setText(
+            "A token from the GITHUB_TOKEN variable is in use." if github.token() and not saved else
+            "A token is saved." if saved else "No token: 60 lookups an hour.")
+        self.clear_token_btn.setEnabled(saved)
         mgr = self.win.mgr
         self.folder_label.setText(
             str(mgr.install.addon_dir) if mgr else
@@ -327,6 +360,28 @@ class SetupPanel(QWidget):
             self.download_btn.setEnabled(True)
 
         self.win.run("Downloading the official launcher…", lambda: official.download(), done, failed)
+
+    def save_token(self) -> None:
+        value = self.token_edit.text().strip()
+        if not value:
+            return
+        self.win.settings.set("github_token", value)
+        github.clear_cache()
+        self.token_edit.clear()
+        self.refresh()
+        self.check_limit()
+
+    def clear_token(self) -> None:
+        self.win.settings.set("github_token", None)
+        self.refresh()
+
+    def check_limit(self) -> None:
+        def show(rate: dict) -> None:
+            reset = time.strftime("%H:%M", time.localtime(rate.get("reset", 0)))
+            self.token_label.setText(f"{self.token_label.text().split(' GitHub')[0]} GitHub: {rate.get('remaining')} "
+                                     f"of {rate.get('limit')} lookups left this hour, resets at {reset}.")
+
+        self.win.run("Asking GitHub…", github.rate_limit, show)
 
     def choose_launcher(self) -> None:
         start = str(official.default_dir()) if official.default_dir().is_dir() else str(Path.home())
@@ -354,7 +409,7 @@ class SetupDialog(QDialog):
         self.panel = SetupPanel(win)
         lay.addWidget(_scrolled(self.panel), 1)
         buttons = QDialogButtonBox()
-        copy_report = buttons.addButton("Copy report for help", QDialogButtonBox.ActionRole)
+        copy_report = buttons.addButton("Copy diagnostics", QDialogButtonBox.ActionRole)
         copy_report.clicked.connect(win.copy_report)
         buttons.addButton("Done", QDialogButtonBox.AcceptRole)
         buttons.accepted.connect(self.accept)
@@ -551,6 +606,7 @@ class MainWindow(QMainWindow):
         self.mgr: Manager | None = Manager.from_settings(self.settings)
         self.registry: Registry | None = None
         self.updates: dict[str, github.Release] = {}
+        self.untracked: dict[str, Addon] = {}  # installed by hand, found in the catalogue
         self.checks: list[syscheck.Check] | None = None
         self.pool = QThreadPool.globalInstance()
         self.jobs: set[Job] = set()
@@ -751,6 +807,16 @@ class MainWindow(QMainWindow):
         self.update_all_btn = _button("Update all", self.update_all)
         row.addWidget(self.update_all_btn)
         lay.addLayout(row)
+        self.track_row = QWidget()
+        tr = QHBoxLayout(self.track_row)
+        tr.setContentsMargins(0, 0, 0, 0)
+        self.track_label = _label(muted=True)
+        tr.addWidget(self.track_label, 1)
+        self.track_all_btn = _button("Track all", lambda: self.track(sorted(self.untracked)),
+                                     "Check these addons for updates from now on; their settings stay as they are")
+        tr.addWidget(self.track_all_btn)
+        self.track_row.hide()
+        lay.addWidget(self.track_row)
         self.installed = _table(["On", "Addon", "Installed", "Latest", ""], stretch=1)
         self.installed.horizontalHeader().setSectionResizeMode(4, QHeaderView.Fixed)
         self.installed.setColumnWidth(4, 180)
@@ -814,8 +880,14 @@ class MainWindow(QMainWindow):
         self.setup_panel = SetupPanel(self)
         lay.addWidget(_scrolled(self.setup_panel), 1)
         row = QHBoxLayout()
-        row.addWidget(_button("Copy report for help", self.copy_report,
-                              "Your system details and the official launcher's log, for anyone helping you"))
+        row.addWidget(_button("Copy diagnostics", self.copy_report,
+                              "Your system details, the launcher's log and the official launcher's log, "
+                              "for a bug report or anyone helping you"))
+        row.addWidget(_button("Open log folder", lambda: QDesktopServices.openUrl(
+            QUrl.fromLocalFile(str(logs.path().parent))), str(logs.path())))
+        row.addWidget(_button("Report a bug", lambda: QDesktopServices.openUrl(
+            QUrl(f"https://github.com/{APP_REPO}/issues/new?template=bug_report.yml")),
+            "Opens GitHub; paste the diagnostics there"))
         row.addStretch()
         lay.addLayout(row)
         return w
@@ -856,7 +928,13 @@ class MainWindow(QMainWindow):
         def fail(message: str) -> None:
             finish()
             self.statusBar().showMessage("Something went wrong", 5000)
-            QMessageBox.warning(self, APP_NAME, message)
+            box = QMessageBox(QMessageBox.Warning, APP_NAME, message, parent=self)
+            token = box.addButton("Add a token", QMessageBox.ActionRole) if github.TOKEN_HINT in message else None
+            box.addButton(QMessageBox.Ok)
+            box.exec()
+            if token is not None and box.clickedButton() is token:
+                self.go(self.SETUP)
+                self.setup_panel.token_edit.setFocus()
             if failed:
                 failed(message)
 
@@ -894,7 +972,7 @@ class MainWindow(QMainWindow):
             self.tag_filter.clear()
             self.tag_filter.addItems(["All tags", *tags])
             self.tag_filter.blockSignals(False)
-            self.refresh_browse()
+            self.refresh_installed()  # also finds hand-installed addons that are in the catalogue
             self.statusBar().showMessage(f"{len(reg.addons)} addons in the catalogue", 4000)
             self.check_updates()
 
@@ -1014,12 +1092,19 @@ class MainWindow(QMainWindow):
         if self.mgr is None:
             self.folder_label.setText("No addon folder found")
             self.installed.setRowCount(0)
+            self.track_row.hide()
             self.empty_label.setText("Couldn't find ArcheAge Classic. Use Change folder… to pick ~/Documents/AAClassic.")
             self.empty_label.show()
             self.refresh_header()
             return
         self.folder_label.setText(str(self.mgr.install.addon_dir))
         local = self.mgr.local()
+        self.untracked = self.mgr.untracked(self.registry) if self.registry else {}
+        n = len(self.untracked)
+        self.track_label.setText(
+            f"{n} addon{'s' if n != 1 else ''} you installed by hand {'are' if n != 1 else 'is'} in the catalogue "
+            f"({', '.join(self.untracked)}). Track {'them' if n != 1 else 'it'} to get updates.")
+        self.track_row.setVisible(bool(n))
         self.empty_label.setVisible(not local)
         self.installed.setRowCount(len(local))
         for row, a in enumerate(local):
@@ -1037,14 +1122,25 @@ class MainWindow(QMainWindow):
             self.installed.setItem(row, 1, _item(title, meta.description if meta else ""))
             self.installed.setItem(row, 2, _item(a.version))
             latest = self.updates.get(a.name)
-            status = _item(latest.version if latest else ("" if not a.managed else "up to date"))
-            status.setForeground(theme.colour("positive" if latest else "inactive"))
+            failed = self.mgr.check_errors.get(a.name)
+            if latest:
+                status = _item(latest.version)
+            elif failed:
+                status = _item("could not check", failed)
+            elif a.name in self.untracked:
+                status = _item("not tracked", "Installed by hand. Track it to get updates from the catalogue.")
+            else:
+                status = _item("" if not a.managed else "up to date")
+            status.setForeground(theme.colour("positive" if latest else "negative" if failed else "inactive"))
             self.installed.setItem(row, 3, status)
             actions = QWidget()
             al = QHBoxLayout(actions)
             al.setContentsMargins(4, 2, 4, 2)
             if latest:
                 al.addWidget(_button("Update", lambda _=False, n=a.name: self.update([n])))
+            elif a.name in self.untracked:
+                al.addWidget(_button("Track", lambda _=False, n=a.name: self.track([n]),
+                                     "Check it for updates from now on"))
             al.addWidget(_button("Remove", lambda _=False, n=a.name: self.remove(n)))
             self.installed.setCellWidget(row, 4, actions)
         self.update_all_btn.setText(f"Update all ({len(self.updates)})" if self.updates else "Update all")
@@ -1152,6 +1248,16 @@ class MainWindow(QMainWindow):
         (installer.enable if on else installer.disable)(self.mgr.install, name)
         self.statusBar().showMessage(f"{'Enabled' if on else 'Disabled'} {name}", 3000)
 
+    def track(self, names: list[str]) -> None:
+        if not self._guard():
+            return
+        for name in names:
+            if name in self.untracked:
+                self.mgr.track(name, self.untracked[name])
+        self.statusBar().showMessage(f"Tracking {', '.join(names)}", 4000)
+        self.refresh_installed()
+        self.check_updates()
+
     def remove(self, name: str) -> None:
         if not self._guard():
             return
@@ -1174,7 +1280,7 @@ class MainWindow(QMainWindow):
 
     def copy_report(self) -> None:
         QApplication.clipboard().setText(report.build(self.settings))
-        self.statusBar().showMessage("Report copied. Paste it where you ask for help.", 6000)
+        self.statusBar().showMessage("Diagnostics copied. Paste them into a bug report or where you ask for help.", 6000)
 
     def _game(self, state: str | None, detail: str = "", button: str | None = None) -> None:
         """Show what the game is doing on the Play tab; a button text disables Play while it lasts."""
@@ -1317,6 +1423,7 @@ def main(argv: list[str] | None = None) -> int:
     if icon.exists():
         app.setWindowIcon(QIcon(str(icon)))
     theme.apply(app)
+    logs.setup("aacam-gui")
     win = MainWindow()
     if "--selftest" in app.arguments():
         # Used by CI to prove the AppImage starts on each distro: Qt, its plugins and our code load.

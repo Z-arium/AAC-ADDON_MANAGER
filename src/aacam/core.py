@@ -41,6 +41,7 @@ class Manager:
     def __init__(self, install: paths.Install) -> None:
         self.install = install
         self.db = InstalledDb(install.addon_dir)
+        self.check_errors: dict[str, str] = {}  # addon -> why its last update check failed
 
     @classmethod
     def from_settings(cls, settings: Settings) -> Manager | None:
@@ -113,19 +114,61 @@ class Manager:
         rec = self.db.addons.get(name) or {}
         if rec.get("source") == "repo":
             return Addon(name, name, "", rec["repo"].split("/")[0], rec["repo"], rec.get("branch") or "main")
-        return reg.get(name)
+        addon = reg.get(rec.get("catalogue") or name)
+        if addon is not None and addon.name != name:
+            # Install into the folder the player already has, not the catalogue's name.
+            addon = Addon(name, addon.alias, addon.description, addon.author, addon.repo, addon.branch,
+                          addon.tags, addon.dependencies)
+        return addon
 
     def check_updates(self, reg: Registry, names: list[str] | None = None) -> dict[str, github.Release]:
         """Managed addons whose latest release differs from the installed one."""
         out = {}
+        self.check_errors: dict[str, str] = {}
         for name in names or sorted(self.db.addons):
             addon = self.addon_for(reg, name)
             if addon is None or name not in self.db.addons:
                 continue
-            release = github.latest_release(addon.repo, addon.branch)
+            try:
+                release = github.latest_release(addon.repo, addon.branch)
+            except (github.RateLimited, github.Offline):
+                raise  # every other addon would fail the same way
+            except github.GitHubError as e:
+                self.check_errors[name] = str(e)  # one broken repo doesn't stop the rest
+                continue
             if release.version != self.db.addons[name]["version"]:
                 out[name] = release
         return out
+
+    def untracked(self, reg: Registry) -> dict[str, Addon]:
+        """Addon folders put there by hand or by another manager that match a catalogue entry,
+        by folder name or the addon's display name, ignoring case."""
+        out = {}
+        for name in installer.local_addons(self.install):
+            if name in self.db.addons:
+                continue
+            addon = reg.get(name) or next(
+                (a for a in reg.addons.values() if a.alias.lower() == name.lower()), None)
+            if addon is not None:
+                out[name] = addon
+        return out
+
+    def track(self, name: str, addon: Addon) -> None:
+        """Start updating a folder we didn't install. Its version is unknown, so the next
+        check offers the latest release; .data and addons.txt stay as they are."""
+        if not (self.install.addon_dir / name / "main.lua").is_file():
+            raise NotFound(name)
+        self.db.addons[name] = {
+            "version": "unknown",
+            "repo": addon.repo,
+            "commit": None,
+            "installed_at": int(time.time()),
+            "source": "tracked",
+        }
+        if addon.name != name:
+            # Folder name differs from the catalogue's (e.g. different case): remember the entry.
+            self.db.addons[name]["catalogue"] = addon.name
+        self.db.save()
 
     def remove(self, name: str, purge: bool = False) -> None:
         installer.remove(self.install, name, purge=purge)
