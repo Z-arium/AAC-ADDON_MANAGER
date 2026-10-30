@@ -24,7 +24,7 @@ The launcher works only from the outside, the same way a player does by hand:
 - **Login and patching stay with the official launcher.** We start it and get out of the way; we never handle credentials.
 - **Addons only through the game's own addon system:** Lua addons in `Documents/AAClassic/Addon` and the `addons.txt` list the game reads. That is the mechanism the game provides for addons.
 - **Linux setup only through the standard layers.** Drivers, FUSE, and Wine/Proton settings that change how Windows runs on Linux, not how the game behaves. Before we ship any Wine/Proton tweak beyond what the official launcher already does, we confirm with the ArcheAge Classic team (Discord) that it is allowed.
-- **Watching the game is read-only.** We check whether the game's process exists, to know when it started and closed, and read the figures Linux itself publishes about any process (memory in use, which Wine runs it, its environment variables) to explain crashes. We never read or write the game's memory and never attach to it; anti-cheat running inside Wine cannot see these reads.
+- **Watching the game is read-only.** We check whether the game's process exists, to know when it started and closed, and read the figures Linux itself publishes about any process (memory in use, which address ranges are taken, which Wine runs it, its environment variables) to explain crashes. We never read or write the game's memory and never attach to it; anti-cheat running inside Wine cannot see these reads.
 
 A feature that can't meet these rules doesn't ship.
 
@@ -77,6 +77,8 @@ In v0.2.3: a player can opt in to test WoW64 Wine on their own PC before the tea
 In v0.2.4: HTTPS works from the AppImage on Arch (it couldn't find Arch's CA certificates, so addon updates and downloads said "could not reach GitHub"); `aacam doctor --network` checks it, and CI runs that on Arch.
 
 In v0.2.5: a new look. The window opens on a Play screen with painted art, a big Play button and status tiles, and has a sidebar for My Addons, Get Addons, Crash fixes and Setup, in a dark and gold theme that looks the same on KDE and GNOME.
+
+In v0.2.6: a live memory meter. While the game runs, the status bar shows how much of its 4 GB it uses against the 3.85 GB where sessions crashed (green, amber from 3.7, red at the line), and `aacam watch` prints the same in a terminal. It measures the address space below 4 GB from the ranges Linux lists for the process, so it also works under WoW64 Wine, where the old VmSize figure counted the 64-bit side.
 
 In v0.2.7: v0.2.5's look read as generic (Jacob, 2026-10-30), so it was replaced. The window now uses the desktop's own colours, and the Play tab shows the player's own in-game screenshot instead of drawn art.
 

@@ -29,6 +29,7 @@ from PySide6.QtWidgets import (
     QMainWindow,
     QMessageBox,
     QPlainTextEdit,
+    QProgressBar,
     QPushButton,
     QScrollArea,
     QTableWidget,
@@ -517,7 +518,14 @@ class MainWindow(QMainWindow):
         self.tabs.currentChanged.connect(self._tab_shown)
         lay.addWidget(self.tabs, 1)
         self.setCentralWidget(central)
-        self.statusBar()
+        # Live readout of the game's 4 GB while it runs; full means a likely out-of-memory crash.
+        self.memory_bar = QProgressBar()
+        self.memory_bar.setRange(0, crash.WARN_KIB)
+        self.memory_bar.setFixedWidth(340)
+        self.memory_bar.setToolTip("How much of its 4 GB of address space the 32-bit game uses. Sessions that "
+                                   "crashed ran out at about 3.85 GB. Lower texture quality if it gets close.")
+        self.memory_bar.hide()
+        self.statusBar().addPermanentWidget(self.memory_bar)
 
         self.refresh_installed()
         QTimer.singleShot(0, self.load_registry)
@@ -1050,6 +1058,7 @@ class MainWindow(QMainWindow):
         if self.watch is None:
             return
         state = self.watch.poll()
+        self._show_memory(self.watch)
         if state is None:
             self._check_memory(self.watch)
             return
@@ -1082,13 +1091,26 @@ class MainWindow(QMainWindow):
             elif box.clickedButton() is copy:
                 self.copy_report()
 
+    def _show_memory(self, watch: official.GameWatch | None) -> None:
+        used = watch.sampler.used_kib() if watch is not None and watch.sampler and watch.state == "game" else None
+        if used is None:
+            self.memory_bar.hide()
+            return
+        self.memory_bar.setValue(min(used, crash.WARN_KIB))
+        self.memory_bar.setFormat(f"Game memory: {crash.meter(used)}")
+        level = "negative" if used >= crash.WARN_KIB else "neutral" if used >= crash.CAUTION_KIB else "positive"
+        bar = self.memory_bar.palette()
+        bar.setColor(QPalette.Highlight, theme.colour(level))
+        self.memory_bar.setPalette(bar)
+        self.memory_bar.show()
+
     def _check_memory(self, watch: official.GameWatch) -> None:
         """Warn once per session when the 32-bit game is about to run out of its 4 GB."""
         sampler = watch.sampler
         if sampler is None or self.memory_warned or not sampler.near_limit():
             return
         self.memory_warned = True
-        used = sampler.last.get("VmSize", 0) / 1e6
+        used = (sampler.used_kib() or 0) / 1e6
         text = (f"ArcheAge Classic is using {used:.2f} of its 4 GB and may crash at the next zone load. "
                 "Lower texture quality in the game's options, or log out somewhere safe.")
         self.statusBar().showMessage(text)
