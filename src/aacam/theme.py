@@ -8,9 +8,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import QPointF, QRectF, Qt
+from PySide6.QtCore import QPointF, Qt
 from PySide6.QtGui import QColor, QFont, QFontDatabase, QPainter, QPainterPath, QPalette, QPen, QPixmap
-from PySide6.QtWidgets import QApplication, QWidget
+from PySide6.QtWidgets import QApplication
 
 from . import config
 
@@ -120,6 +120,10 @@ QLabel#good {{ color: {GREEN}; }}
 QLabel#bad {{ color: {RED}; }}
 QFrame#rule {{ background: {RULE}; min-height: 1px; max-height: 1px; border: none; }}
 QFrame#dots {{ border: none; border-bottom: 1px dotted {DOTS}; }}
+QFrame#plaque {{ background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 {PAPER_HI}, stop:1 {PAPER_LO}); border: 1px solid {BRONZE}; border-radius: 4px; }}
+QFrame#plaque QLabel {{ background: transparent; }}
+QFrame#plaque QLabel#h1 {{ font-size: 22pt; }}
+QFrame#plaque QLabel#step {{ font-family: "{SERIF}"; font-weight: bold; font-size: 10pt; color: {LIGHT}; background: {BRONZE}; border-radius: 11px; }}
 
 QTabWidget::pane {{
     background: qradialgradient(cx:0.4, cy:0.3, radius:1, fx:0.4, fy:0.3, stop:0 {PAPER_HI}, stop:0.8 {PAPER_LO});
@@ -150,8 +154,6 @@ QPushButton#play {{
 }}
 QPushButton#link {{ background: transparent; border: none; padding: 0; color: #6b4a22; font-weight: 500; }}
 QPushButton#link:hover {{ text-decoration: underline; }}
-QPushButton#linkCaption {{ background: transparent; border: none; padding: 0; color: {FADED}; font-style: italic; font-size: 10pt; }}
-QPushButton#linkCaption:hover {{ color: #6b4a22; text-decoration: underline; }}
 
 QLineEdit, QComboBox, QPlainTextEdit {{
     background: {FIELD}; border: 1px solid #a88d62; border-radius: 3px; padding: 5px 8px;
@@ -217,68 +219,3 @@ def apply(app: QApplication) -> None:
     app.setPalette(pal)
     app.setFont(font())
     app.setStyleSheet(stylesheet())
-
-
-# --- the player's screenshot --------------------------------------------------------
-
-IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png", ".bmp"}
-
-
-def latest_screenshot(root: Path | None) -> Path | None:
-    """The newest picture the player took in game, from a Screenshot(s) folder of the install."""
-    if root is None:
-        return None
-    folders = []
-    for parent in (root, root.parent):
-        try:
-            folders += [p for p in parent.iterdir() if p.is_dir() and p.name.lower().startswith("screenshot")]
-        except OSError:
-            continue
-    best: tuple[float, Path] | None = None
-    for folder in folders:
-        try:
-            for f in folder.iterdir():
-                if f.suffix.lower() in IMAGE_SUFFIXES and f.is_file():
-                    t = f.stat().st_mtime
-                    if best is None or t > best[0]:
-                        best = (t, f)
-        except OSError:
-            continue
-    return best[1] if best else None
-
-
-class Picture(QWidget):
-    """A screenshot in a bronze frame with a dark mat, like a painting hung in a game window."""
-
-    def __init__(self) -> None:
-        super().__init__()
-        self.picture: QPixmap | None = None
-        self.path: Path | None = None
-        self.setMinimumSize(320, 200)
-
-    def set_picture(self, path: Path | None) -> None:
-        if path == self.path:
-            return
-        self.path = path
-        pix = QPixmap(str(path)) if path else QPixmap()
-        self.picture = None if pix.isNull() else pix
-        self.update()
-
-    def paintEvent(self, _event) -> None:  # noqa: N802 (Qt name)
-        p = QPainter(self)
-        r = QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5)
-        p.setPen(QPen(QColor("#7b6240"), 1))
-        p.setBrush(QColor("#2b2219"))
-        p.drawRect(r)
-        inner = r.adjusted(4.5, 4.5, -4.5, -4.5)
-        if self.picture is None:
-            p.setPen(QColor("#a3916f"))
-            p.setFont(font(SERIF, 12.5))
-            p.drawText(inner.adjusted(30, 0, -30, 0), Qt.AlignCenter | Qt.TextWordWrap,
-                       "Your own screenshots hang here. Hide the game's interface, then press Print Screen.")
-            return
-        p.setRenderHint(QPainter.SmoothPixmapTransform)
-        pw, ph = self.picture.width(), self.picture.height()
-        scale = max(inner.width() / pw, inner.height() / ph)
-        sw, sh = inner.width() / scale, inner.height() / scale
-        p.drawPixmap(inner, self.picture, QRectF((pw - sw) / 2, (ph - sh) / 2, sw, sh))
