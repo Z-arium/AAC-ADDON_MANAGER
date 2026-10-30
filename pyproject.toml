@@ -23,4 +23,4 @@ aacam-gui = "aacam.gui:main"
 where = ["src"]
 
 [tool.setuptools.package-data]
-aacam = ["icon.png"]
+aacam = ["icon.png", "fonts/*"]

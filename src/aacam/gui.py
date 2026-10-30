@@ -5,6 +5,7 @@ from __future__ import annotations
 import shutil
 import subprocess
 import sys
+import time
 import traceback
 from pathlib import Path
 from typing import Any, Callable
@@ -34,6 +35,7 @@ from PySide6.QtWidgets import (
     QScrollArea,
     QTableWidget,
     QTableWidgetItem,
+    QTabBar,
     QTabWidget,
     QVBoxLayout,
     QWidget,
@@ -147,7 +149,9 @@ def _scrolled(widget: QWidget) -> QScrollArea:
     area = QScrollArea()
     area.setWidgetResizable(True)
     area.setFrameShape(QFrame.NoFrame)
+    area.setObjectName("paper")
     holder = QWidget()
+    holder.setObjectName("paper")
     lay = QVBoxLayout(holder)
     lay.setContentsMargins(0, 0, 8, 0)
     lay.addWidget(widget)
@@ -156,8 +160,53 @@ def _scrolled(widget: QWidget) -> QScrollArea:
     return area
 
 
-def _tab(margins: int = 12) -> tuple[QWidget, QVBoxLayout]:
+def _rule() -> QFrame:
+    line = QFrame()
+    line.setObjectName("rule")
+    return line
+
+
+def _cell(text: str, role: str = "") -> QLabel:
+    lab = QLabel(text)
+    if role:
+        lab.setObjectName(role)
+    return lab
+
+
+def _clear(grid: QGridLayout) -> None:
+    while grid.count():
+        item = grid.takeAt(0)
+        if item.widget():
+            item.widget().deleteLater()
+
+
+def _fill_grid(grid: QGridLayout, rows: list[list[QWidget]]) -> None:
+    _clear(grid)
+    for r, cells in enumerate(rows):
+        for c, cell in enumerate(cells):
+            grid.addWidget(cell, r, c)
+
+
+def _fill_columns(grid: QGridLayout, pairs: list[tuple[QWidget, QWidget]], columns: int) -> None:
+    """Name/value pairs laid out down `columns` columns, each pair on a dotted line."""
+    _clear(grid)
+    per = max(1, -(-len(pairs) // columns))
+    for i, (left, right) in enumerate(pairs):
+        line = QFrame()
+        line.setObjectName("dots")
+        row = QHBoxLayout(line)
+        row.setContentsMargins(0, 6, 0, 6)
+        row.addWidget(left)
+        row.addStretch()
+        row.addWidget(right)
+        grid.addWidget(line, i % per, i // per)
+    for c in range(columns):
+        grid.setColumnStretch(c, 1)
+
+
+def _tab(margins: int = 22) -> tuple[QWidget, QVBoxLayout]:
     w = QWidget()
+    w.setObjectName("paper")
     lay = QVBoxLayout(w)
     lay.setContentsMargins(margins, margins, margins, margins)
     lay.setSpacing(10)
@@ -488,7 +537,8 @@ class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
         self.setWindowTitle(APP_NAME)
-        self.resize(1040, 700)
+        self.resize(1180, 760)
+        self.setMinimumSize(980, 660)
         self.settings = Settings()
         self.mgr: Manager | None = Manager.from_settings(self.settings)
         self.registry: Registry | None = None
@@ -504,18 +554,32 @@ class MainWindow(QMainWindow):
         self.watch_timer.setInterval(2000)
         self.watch_timer.timeout.connect(self.poll_game)
 
-        central = QWidget()
-        lay = QVBoxLayout(central)
-        lay.setContentsMargins(0, 0, 0, 0)
-        lay.setSpacing(0)
         self.tabs = QTabWidget()
-        self.tabs.setDocumentMode(True)
+        self.tabs.tabBar().hide()  # the header has its own tab bar, to the right of the name
         self.tabs.addTab(self._build_play_tab(), "Play")
         self.tabs.addTab(self._build_installed_tab(), "My Addons")
         self.tabs.addTab(self._build_browse_tab(), "Get Addons")
         self.tabs.addTab(self._build_fixes_tab(), "Crash fixes")
         self.tabs.addTab(self._build_setup_tab(), "Setup")
         self.tabs.currentChanged.connect(self._tab_shown)
+        self.tab_bar = QTabBar()
+        self.tab_bar.setDrawBase(False)
+        self.tab_bar.setExpanding(False)
+        self.tab_bar.setUsesScrollButtons(False)
+        for i in range(self.tabs.count()):
+            self.tab_bar.addTab(self.tabs.tabText(i))
+        self.tab_bar.currentChanged.connect(self.tabs.setCurrentIndex)
+        self.tabs.currentChanged.connect(self.tab_bar.setCurrentIndex)
+        central = QWidget()
+        lay = QVBoxLayout(central)
+        lay.setContentsMargins(0, 14, 0, 0)
+        lay.setSpacing(0)
+        head = QHBoxLayout()
+        head.setContentsMargins(0, 0, 14, 0)
+        head.addWidget(self._build_brand(), 0, Qt.AlignBottom)
+        head.addStretch()
+        head.addWidget(self.tab_bar, 0, Qt.AlignBottom)
+        lay.addLayout(head)
         lay.addWidget(self.tabs, 1)
         self.setCentralWidget(central)
         # Live readout of the game's 4 GB while it runs; full means a likely out-of-memory crash.
@@ -536,62 +600,110 @@ class MainWindow(QMainWindow):
 
     # layout
 
-    def _build_play_tab(self) -> QWidget:
-        """Your own screenshot, full size, with the game's name, what it's doing and the Play button."""
-        self.showcase = theme.Showcase()
-        lay = QVBoxLayout(self.showcase)
-        lay.setContentsMargins(28, 18, 28, 26)
-        top = QHBoxLayout()
-        top.addStretch()
-        self.picture_btn = _button("Change picture…", self.choose_picture,
-                                   "Pick one of your screenshots. Hide the game's interface before you take one.")
-        self.picture_btn.setStyleSheet(
-            "QPushButton { background: rgba(0,0,0,110); color: white; border: 1px solid rgba(255,255,255,60);"
-            " border-radius: 4px; padding: 4px 12px; } QPushButton:hover { background: rgba(0,0,0,160); }")
-        top.addWidget(self.picture_btn)
-        lay.addLayout(top)
-        lay.addStretch(1)
-        self.no_picture = QWidget()
-        hint = QVBoxLayout(self.no_picture)
-        hint.setAlignment(Qt.AlignCenter)
-        msg = _label("Your own ArcheAge screenshots show here. Hide the game's interface, then press "
-                     "Print Screen; the game saves them in Documents/AAClassic/ScreenShots.", muted=True)
-        msg.setAlignment(Qt.AlignCenter)
-        msg.setFixedWidth(460)
-        msg.setMinimumHeight(msg.heightForWidth(460))
-        hint.addWidget(msg, 0, Qt.AlignCenter)
-        hint.addWidget(_button("Choose a picture…", self.choose_picture), 0, Qt.AlignCenter)
-        lay.addWidget(self.no_picture)
-        lay.addStretch(1)
+    def _build_brand(self) -> QWidget:
+        brand = QWidget()
+        lay = QVBoxLayout(brand)
+        lay.setContentsMargins(26, 0, 0, 6)
+        lay.setSpacing(0)
+        name = QLabel("ArcheAge Classic")
+        name.setObjectName("brand")
+        lay.addWidget(name)
+        sub = QLabel(f"Linux Launcher {__version__}")
+        sub.setObjectName("brandSub")
+        lay.addWidget(sub)
+        return brand
 
-        row = QHBoxLayout()
-        row.setSpacing(24)
-        words = QVBoxLayout()
-        words.setSpacing(4)
-        self.title = QLabel("ArcheAge Classic")
-        self.title.setFont(theme.title_font(self.font(), self.font().pointSizeF() * 2.2))
-        words.addWidget(self.title)
+    def _build_play_tab(self) -> QWidget:
+        """Your own screenshot in a frame, what is ready and what isn't, Play, your addons, recent sessions."""
+        w = QWidget()
+        w.setObjectName("paper")
+        grid = QGridLayout(w)
+        grid.setContentsMargins(26, 22, 26, 18)
+        grid.setHorizontalSpacing(28)
+        grid.setVerticalSpacing(6)
+
+        self.showcase = theme.Picture()
+        grid.addWidget(self.showcase, 0, 0)
+        caption = QHBoxLayout()
+        self.caption = QLabel()
+        self.caption.setObjectName("caption")
+        caption.addWidget(self.caption)
+        change = _button("Change picture", self.choose_picture,
+                         "Pick one of your screenshots. Hide the game's interface before you take one.")
+        change.setObjectName("linkCaption")
+        change.setCursor(Qt.PointingHandCursor)
+        caption.addWidget(change)
+        caption.addStretch()
+        grid.addLayout(caption, 1, 0)
+
+        side = QVBoxLayout()
+        side.setSpacing(2)
         self.state = QLabel()
+        self.state.setObjectName("h1")
         self.state.setWordWrap(True)
-        words.addWidget(self.state)
-        self.facts = QLabel()
-        self.facts.setWordWrap(True)
-        words.addWidget(self.facts)
-        row.addLayout(words, 1)
+        side.addWidget(self.state)
+        self.detail = QLabel()
+        self.detail.setObjectName("faded")
+        self.detail.setWordWrap(True)
+        side.addWidget(self.detail)
+        side.addSpacing(10)
+        side.addWidget(_rule())
+        self.facts = QGridLayout()
+        self.facts.setContentsMargins(0, 8, 0, 8)
+        self.facts.setHorizontalSpacing(18)
+        self.facts.setVerticalSpacing(7)
+        self.facts.setColumnStretch(1, 1)
+        side.addLayout(self.facts)
+        side.addWidget(_rule())
+        side.addSpacing(14)
         self.play_btn = _button("Play", self.play, "Update addons, then start the game through the official launcher")
-        self.play_btn.setFont(theme.title_font(self.font(), self.font().pointSizeF() * 1.4))
-        self.play_btn.setMinimumSize(180, 54)
-        accent, text = theme.colour("selection"), theme.colour("selection_text")
-        self.play_btn.setStyleSheet(
-            f"QPushButton {{ background: {accent.name()}; color: {text.name()}; border: 1px solid {accent.darker(130).name()};"
-            f" border-radius: 4px; padding: 0 32px; }}"
-            f" QPushButton:hover {{ background: {accent.lighter(110).name()}; }}"
-            f" QPushButton:pressed {{ background: {accent.darker(115).name()}; }}"
-            f" QPushButton:disabled {{ background: {theme.mix(accent, theme.colour('window'), 0.6).name()};"
-            f" color: {theme.mix(text, theme.colour('window'), 0.4).name()}; }}")
-        row.addWidget(self.play_btn, 0, Qt.AlignBottom)
-        lay.addLayout(row)
-        return self.showcase
+        self.play_btn.setObjectName("play")
+        self.play_btn.setMinimumHeight(58)
+        self.play_btn.setCursor(Qt.PointingHandCursor)
+        side.addWidget(self.play_btn)
+        hint = QLabel("Opens the official launcher. Log in and press Play there.")
+        hint.setObjectName("caption")
+        hint.setAlignment(Qt.AlignCenter)
+        side.addWidget(hint)
+        side.addStretch()
+        grid.addLayout(side, 0, 1, 2, 1)
+        grid.setColumnStretch(0, 3)
+        grid.setColumnStretch(1, 2)
+        grid.setRowStretch(0, 1)
+
+        grid.addLayout(self._section("Your addons", "update_all", "Update all", self.update_all), 2, 0, 1, 2)
+        self.home_addons = QGridLayout()
+        self.home_addons.setHorizontalSpacing(26)
+        self.home_addons.setVerticalSpacing(0)
+        grid.addLayout(self.home_addons, 3, 0, 1, 2)
+        grid.addLayout(self._section("Recent sessions", "sessions", "Crash fixes", lambda: self.go(self.FIXES)), 4, 0, 1, 2)
+        self.home_sessions = QGridLayout()
+        self.home_sessions.setHorizontalSpacing(26)
+        grid.addLayout(self.home_sessions, 5, 0, 1, 2)
+        return w
+
+    def _section(self, title: str, key: str, action: str, slot: Callable) -> QVBoxLayout:
+        """A serif heading with a faded note and a link on the right, over a bronze rule."""
+        box = QVBoxLayout()
+        box.setSpacing(4)
+        box.setContentsMargins(0, 14, 0, 0)
+        row = QHBoxLayout()
+        head = QLabel(title)
+        head.setObjectName("h2")
+        row.addWidget(head)
+        note = QLabel()
+        note.setObjectName("faded")
+        row.addWidget(note, 0, Qt.AlignBottom)
+        row.addStretch()
+        link = _button(action, slot)
+        link.setObjectName("link")
+        link.setCursor(Qt.PointingHandCursor)
+        row.addWidget(link)
+        box.addLayout(row)
+        box.addWidget(_rule())
+        setattr(self, f"{key}_note", note)
+        setattr(self, f"{key}_link", link)
+        return box
 
     def picture(self) -> Path | None:
         """The screenshot the player chose, else their newest one."""
@@ -624,6 +736,8 @@ class MainWindow(QMainWindow):
         row.addWidget(self.update_all_btn)
         lay.addLayout(row)
         self.installed = _table(["On", "Addon", "Installed", "Latest", ""], stretch=1)
+        self.installed.horizontalHeader().setSectionResizeMode(4, QHeaderView.Fixed)
+        self.installed.setColumnWidth(4, 180)
         lay.addWidget(self.installed, 1)
         self.empty_label = _label("No addons yet. Find some in Get Addons.", muted=True)
         self.empty_label.setAlignment(Qt.AlignCenter)
@@ -644,6 +758,8 @@ class MainWindow(QMainWindow):
         row.addWidget(self.tag_filter)
         lay.addLayout(row)
         self.browse = _table(["Addon", "Author", "Tags", "Description", ""], stretch=3)
+        self.browse.horizontalHeader().setSectionResizeMode(4, QHeaderView.Fixed)
+        self.browse.setColumnWidth(4, 110)
         lay.addWidget(self.browse, 1)
         return w
 
@@ -652,6 +768,7 @@ class MainWindow(QMainWindow):
         self.fixes_area = QScrollArea()
         self.fixes_area.setWidgetResizable(True)
         self.fixes_area.setFrameShape(QFrame.NoFrame)
+        self.fixes_area.setObjectName("paper")
         lay.addWidget(self.fixes_area, 1)
         row = QHBoxLayout()
         row.addWidget(_button("Save a crash report now", lambda: self.collect_crash(None, None, show=True),
@@ -802,46 +919,77 @@ class MainWindow(QMainWindow):
         self.pool.start(job)
 
     def refresh_header(self) -> None:
-        """The Play tab: the player's screenshot, what the game is doing, and one line of facts."""
-        self.showcase.set_picture(self.picture())
-        on_picture = self.showcase.on_picture
-        self.no_picture.setVisible(not on_picture)
-        self.picture_btn.setVisible(on_picture)
-        light = "color: white;" if on_picture else ""
-        self.title.setStyleSheet(light)
-        self.state.setStyleSheet(light)
-        self.facts.setStyleSheet("color: rgba(255,255,255,200);" if on_picture else "")
-        if not on_picture:
-            _muted(self.facts)
+        """The Play tab: the player's screenshot, what is ready, their addons and their last sessions."""
+        picture = self.picture()
+        self.showcase.set_picture(picture)
+        self.caption.setText(
+            f"Your screenshot from {time.strftime('%-d %B', time.localtime(picture.stat().st_mtime))} ·"
+            if picture else "No screenshot yet ·")
 
-        if self.game_state:
-            state, detail = self.game_state
-            self.state.setText(f"{state} {detail}".strip())
-        else:
-            self.state.setText("Play updates your addons, then opens the official launcher, where you log in.")
-
-        facts = []
         n = len(self.updates)
-        if self.mgr is None:
-            facts.append("No addon folder yet")
+        local = self.mgr.local() if self.mgr else []
+        launcher = official.locate(self.settings) or self.settings.get("launch")
+        bad = [c for c in self.checks or [] if c.status == syscheck.FAIL]
+        if self.game_state:
+            self.state.setText(self.game_state[0])
+            self.detail.setText(self.game_state[1])
+        elif not launcher or bad:
+            self.state.setText("Almost ready")
+            self.detail.setText("Setup has something to fix first.")
         else:
-            count = len(self.mgr.local())
-            facts.append(f"{count} addon{'s' if count != 1 else ''}"
-                         + (f", {n} update{'s' if n != 1 else ''}" if n else ""))
+            self.state.setText("Ready to play")
+            self.detail.setText(f"{n} addon update{'s go' if n != 1 else ' goes'} in first." if n else
+                                "Your addons are up to date.")
+
+        facts: list[tuple[str, str, str]] = []
+        if self.mgr is None:
+            facts.append(("Addons", "No addon folder yet", "bad"))
+        else:
+            on = sum(1 for a in local if a.enabled)
+            facts.append(("Addons", f"{len(local)} installed, {on} on" + (f" · {n} update{'s' if n != 1 else ''}" if n else ""),
+                          "good" if n else ""))
         chosen = wine.choose(self.settings.get("wine"), opt_in=bool(self.settings.get("wow64_opt_in")))
-        facts.append(f"Wine: {chosen.name}" if chosen else "Wine: the official launcher's choice")
-        fixes = len(self.settings.get("fixes", []))
-        if fixes:
-            facts.append(f"{fixes} crash fix{'es' if fixes != 1 else ''} on")
-        if self.checks is not None:
-            bad = sum(1 for c in self.checks if c.status == syscheck.FAIL)
-            launcher = official.locate(self.settings) or self.settings.get("launch")
-            if bad:
-                facts.append(f"{bad} driver{'s' if bad != 1 else ''} missing, see Setup")
-            if not launcher:
-                facts.append("official launcher not set up, see Setup")
-        self.facts.setText("  ·  ".join(facts))
-        self.tabs.setTabText(self.ADDONS, f"My Addons ({n})" if n else "My Addons")
+        facts.append(("Wine", chosen.name if chosen else "The official launcher's choice", ""))
+        if self.checks is None:
+            facts.append(("Drivers", "Checking…", ""))
+        else:
+            facts.append(("Drivers", f"{len(bad)} missing, see Setup" if bad else "All found", "bad" if bad else ""))
+        facts.append(("Official launcher", "Found" if launcher else "Not set up, see Setup", "" if launcher else "bad"))
+        on = [crash.BY_KEY[k].title for k in self.settings.get("fixes", []) if k in crash.BY_KEY]
+        facts.append(("Crash fixes", f"{len(on)} on" if on else "None on", ""))
+        _fill_grid(self.facts, [[_cell(k, "faded"), _cell(v, role)] for k, v, role in facts])
+
+        rows = []
+        for a in local:
+            meta = self.registry.get(a.name) if self.registry else None
+            box = QCheckBox(meta.alias if meta else a.name)
+            box.setChecked(a.enabled)
+            box.setToolTip("Load this addon in game")
+            box.toggled.connect(lambda checked, name=a.name: self.toggle(name, checked))
+            latest = self.updates.get(a.name)
+            rows.append((box, _cell(f"{a.version} → {latest.version}" if latest else a.version,
+                                    "good" if latest else "faded")))
+        _fill_columns(self.home_addons, rows, 3)
+        self.update_all_note.setText(str(self.mgr.install.addon_dir) if self.mgr else "")
+        self.update_all_link.setText(f"Update all ({n})" if n else "")
+        self.update_all_link.setVisible(bool(n))
+
+        sessions = []
+        for h in reversed(crash.history(3)):
+            when = h.get("time", "")[5:16].replace("-", "/")
+            mins = h.get("minutes")
+            length = (f"{int(mins // 60)} h {int(mins % 60):02d}" if mins and mins >= 60 else
+                      f"{round(mins)} min" if mins else "")
+            if h.get("crashed"):
+                what = ", ".join(h.get("causes") or []) or "crashed"
+                sessions.append((_cell(when), _cell(f"{length} · {what}".strip(" ·"), "bad")))
+            else:
+                sessions.append((_cell(when), _cell(f"{length} · closed normally".strip(" ·"), "faded")))
+        if not sessions:
+            sessions.append((_cell("None yet. Sessions you start with Play show up here.", "faded"), _cell("")))
+        _fill_columns(self.home_sessions, sessions, 3)
+        self.sessions_note.setText("crashes and how long you played")
+        self.tab_bar.setTabText(self.ADDONS, f"My Addons ({n})" if n else "My Addons")
 
     def refresh_installed(self) -> None:
         if self.mgr is None:
@@ -871,8 +1019,7 @@ class MainWindow(QMainWindow):
             self.installed.setItem(row, 2, _item(a.version))
             latest = self.updates.get(a.name)
             status = _item(latest.version if latest else ("" if not a.managed else "up to date"))
-            if not latest:
-                status.setForeground(theme.colour("inactive"))
+            status.setForeground(theme.colour("positive" if latest else "inactive"))
             self.installed.setItem(row, 3, status)
             actions = QWidget()
             al = QHBoxLayout(actions)
@@ -1099,9 +1246,8 @@ class MainWindow(QMainWindow):
         self.memory_bar.setValue(min(used, crash.WARN_KIB))
         self.memory_bar.setFormat(f"Game memory: {crash.meter(used)}")
         level = "negative" if used >= crash.WARN_KIB else "neutral" if used >= crash.CAUTION_KIB else "positive"
-        bar = self.memory_bar.palette()
-        bar.setColor(QPalette.Highlight, theme.colour(level))
-        self.memory_bar.setPalette(bar)
+        colour = {"positive": "#7d9a4a", "neutral": "#c08a2e", "negative": "#b5452c"}[level]
+        self.memory_bar.setStyleSheet(f"QProgressBar::chunk {{ background: {colour}; }}")
         self.memory_bar.show()
 
     def _check_memory(self, watch: official.GameWatch) -> None:
