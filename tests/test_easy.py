@@ -164,7 +164,9 @@ class FlatpakTests(TempHome):
                 self.assertEqual(snap["cmdline"][-1], "bin32/archeage.exe")
                 self.assertEqual(snap["exe"], os.path.realpath(sys.executable))
                 self.assertGreater(snap["VmSize"], 0)
-                self.assertGreater(snap.get("Space32", 0), 0)
+                # A 64-bit test process may map nothing below 4 GB, so only check the copy was read.
+                self.assertIn("Space32", snap)
+                self.assertTrue((mirror / str(fake.pid) / "maps").read_text())
                 self.assertIsNotNone(crash.mem_available_kib())
                 self.assertEqual(oct(mirror.stat().st_mode & 0o777), "0o700")
         finally:
