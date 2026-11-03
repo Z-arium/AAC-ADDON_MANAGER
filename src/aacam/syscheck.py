@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
+from . import host
+
 OK, WARN, FAIL = "ok", "warn", "fail"
 
 # Library folders across distros. /usr/lib holds 64-bit libraries on Arch and
@@ -33,7 +35,8 @@ class Check:
     fix: str | None = None  # shell command that fixes it on this distro
 
 
-def distro(root: Path = Path("/")) -> Distro:
+def distro(root: Path | None = None) -> Distro:
+    root = host.root() if root is None else root
     values: dict[str, str] = {}
     for name in ("etc/os-release", "usr/lib/os-release"):
         try:
@@ -73,7 +76,8 @@ def _elf_bits(path: Path) -> int | None:
     return {1: 32, 2: 64}.get(head[4])
 
 
-def has_lib(name: str, bits: int, root: Path = Path("/")) -> bool:
+def has_lib(name: str, bits: int, root: Path | None = None) -> bool:
+    root = host.root() if root is None else root
     return any(_elf_bits(root / d / name) == bits for d in LIB_DIRS)
 
 
@@ -82,7 +86,8 @@ def _has_vulkan_driver(root: Path) -> bool:
 
 
 def _nvidia(root: Path) -> bool:
-    return (root / "proc/driver/nvidia").exists()
+    # /proc/driver is the kernel's, the same inside Flatpak (where root is /run/host, without /proc).
+    return (root / "proc/driver/nvidia").exists() or (root == host.HOST_ROOT and Path("/proc/driver/nvidia").exists())
 
 
 # Package commands per distro family for each check.
@@ -132,7 +137,8 @@ def _fix(key: str, d: Distro, nvidia: bool = False) -> str | None:
     return fix
 
 
-def run(root: Path = Path("/")) -> list[Check]:
+def run(root: Path | None = None) -> list[Check]:
+    root = host.root() if root is None else root
     d = distro(root)
     nvidia = _nvidia(root)
     steamos = d.family == "steamos"

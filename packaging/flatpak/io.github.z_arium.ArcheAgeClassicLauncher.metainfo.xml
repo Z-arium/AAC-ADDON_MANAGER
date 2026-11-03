@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>io.github.z_arium.ArcheAgeClassicLauncher</id>
+  <name>ArcheAge Classic Linux Launcher</name>
+  <summary>Get ArcheAge Classic running on Linux and keep your addons up to date</summary>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>LicenseRef-proprietary</project_license>
+  <developer id="io.github.z_arium">
+    <name>Z-arium</name>
+  </developer>
+  <description>
+    <p>
+      A free companion to the official ArcheAge Classic launcher. The official launcher still handles
+      login and patching; this one handles what is hard on Linux around it, and manages your addons.
+    </p>
+    <ul>
+      <li>Checks your system for what the game needs and gives the exact fix commands</li>
+      <li>Finds or downloads the official launcher and starts it with the right Wine build</li>
+      <li>Explains crashes from logs and memory use, with switches for known fixes</li>
+      <li>Installs, updates, rolls back and backs up addons from the community catalogue</li>
+    </ul>
+    <p>
+      It never changes game files, never touches the running game and never handles your login.
+    </p>
+  </description>
+  <launchable type="desktop-id">io.github.z_arium.ArcheAgeClassicLauncher.desktop</launchable>
+  <url type="homepage">https://github.com/Z-arium/AAC-ADDON_MANAGER</url>
+  <url type="bugtracker">https://github.com/Z-arium/AAC-ADDON_MANAGER/issues</url>
+  <screenshots>
+    <screenshot type="default">
+      <image>https://raw.githubusercontent.com/Z-arium/AAC-ADDON_MANAGER/main/docs/screenshot.png</image>
+      <caption>The Play tab</caption>
+    </screenshot>
+  </screenshots>
+  <categories>
+    <category>Game</category>
+    <category>Utility</category>
+  </categories>
+  <content_rating type="oars-1.1"/>
+  <releases>
+    <release version="0.5.0" date="2026-11-03">
+      <description>
+        <p>Updates itself, and comes as an AUR package and a Flatpak.</p>
+      </description>
+    </release>
+  </releases>
+</component>

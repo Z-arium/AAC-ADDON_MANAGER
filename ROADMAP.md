@@ -118,14 +118,14 @@ Goal: addon management feels like WowUp, not a table.
 - An app icon in the launcher's parchment look, at every size from 16 to 512 pixels.
 - The look stays parchment on every desktop (Jacob's call, 2026-10-30), so there is no dark or light theme that follows the desktop.
 
-## v0.5: Easy to get and keep current
+## v0.5: Easy to get and keep current (released as v0.5.0)
 
 Goal: installing the manager is one step on any common Linux setup, and it updates itself.
 
-- Self-update for the AppImage (AppImageUpdate zsync info, or download-and-replace from GitHub releases).
-- AUR package (`archeage-classic-linux-launcher-bin`) for Arch and CachyOS users, first of the packages (see Arch Linux first).
-- Flatpak on Flathub, with filesystem access to Wine and Steam prefixes.
-- Signed release checksums.
+- The AppImage updates itself: the status bar and Setup > This launcher offer a new version, and Update (or `aacam self-update`) downloads it from GitHub, checks it against the release's `SHA256SUMS` (and its signature when cosign is installed), replaces the AppImage, keeps the old one as `.old` and restarts. The AppImage also carries zsync update information for AppImageUpdate and Gear Lever. Installs from the AUR, Flatpak or install.sh say how to update instead.
+- AUR package `archeage-classic-linux-launcher-bin` for Arch and CachyOS, first of the packages (see Arch Linux first): the release AppImage extracted to `/opt`, with `aac-linux-launcher`, `aacam`, a menu entry and icons, no FUSE needed. CI builds it with makepkg, installs it with pacman and starts it on Arch before every release, and each release attaches the `PKGBUILD`. The workflow pushes it to the AUR once the repository has an `AUR_SSH_KEY` secret (Jacob: create the AUR account and add the key).
+- Flatpak `io.github.z_arium.ArcheAgeClassicLauncher` (KDE 6.8 runtime, PySide base app), attached to each release. It runs the official launcher, Wine and system tools on the host with `flatpak-spawn --host`, checks the host's libraries under /run/host, and reads the game's process from the host's /proc through a host shell (the same read-only figures as outside Flatpak). Listing it on Flathub is a one-time pull request to flathub/flathub that only Jacob can open; it also needs a license decision (#47).
+- Signed release checksums: `SHA256SUMS` for every file, signed keylessly with Sigstore by the release workflow (`SHA256SUMS.sigstore.json`), plus a GitHub build attestation for the AppImage.
 
 ## v0.6: A launcher you'd keep open
 

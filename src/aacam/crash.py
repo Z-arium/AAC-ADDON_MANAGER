@@ -19,7 +19,7 @@ import zipfile
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
-from . import official, paths, report, wine
+from . import host, official, paths, report, wine
 from .config import Settings, state_dir
 
 # Set on every launch so a report can tell whether our variables reached the game.
@@ -128,8 +128,9 @@ def _kib(value: str) -> int:
     return int(value.split()[0]) if value.split() and value.split()[0].isdigit() else 0
 
 
-def snapshot(pid: int, proc: Path = Path("/proc")) -> dict | None:
+def snapshot(pid: int, proc: Path | None = None) -> dict | None:
     """Memory, executable, folder and Wine variables of one game process."""
+    proc = host.proc() if proc is None else proc
     d = proc / str(pid)
     try:
         status = dict(line.split(":", 1) for line in (d / "status").read_text().splitlines() if ":" in line)
@@ -157,10 +158,11 @@ def snapshot(pid: int, proc: Path = Path("/proc")) -> dict | None:
     return snap
 
 
-def space_32bit_kib(pid: int, proc: Path = Path("/proc")) -> int | None:
+def space_32bit_kib(pid: int, proc: Path | None = None) -> int | None:
     """How much of the game's 4 GB address space is taken, from the address ranges in /proc/PID/maps
     (never the memory itself). Unlike VmSize this also works under a WoW64 Wine, whose 64-bit side
     lives above 4 GB."""
+    proc = host.proc() if proc is None else proc
     total = 0
     try:
         with open(proc / str(pid) / "maps") as maps:
@@ -174,7 +176,8 @@ def space_32bit_kib(pid: int, proc: Path = Path("/proc")) -> int | None:
     return total // 1024
 
 
-def mem_available_kib(meminfo: Path = Path("/proc/meminfo")) -> int | None:
+def mem_available_kib(meminfo: Path | None = None) -> int | None:
+    meminfo = host.proc() / "meminfo" if meminfo is None else meminfo
     try:
         for line in meminfo.read_text().splitlines():
             if line.startswith("MemAvailable:"):
@@ -258,10 +261,10 @@ class Finding:
 
 
 def _run(cmd: list[str], timeout: int = 20) -> str:
-    if not shutil.which(cmd[0]):
+    if not host.which(cmd[0]):
         return f"({cmd[0]} not installed)\n"
     try:
-        return subprocess.run(cmd, capture_output=True, text=True, timeout=timeout).stdout
+        return host.run(cmd, timeout=timeout).stdout
     except (OSError, subprocess.SubprocessError) as e:
         return f"({' '.join(cmd)} failed: {e})\n"
 

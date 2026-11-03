@@ -55,5 +55,12 @@ chmod +x "$app/AppRun"
 tool="$work/appimagetool"
 curl -fsSL -o "$tool" https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage
 chmod +x "$tool"
-ARCH=x86_64 "$tool" --appimage-extract-and-run "$app" dist/ArcheAge-Classic-Linux-Launcher-x86_64.AppImage
-echo "Built dist/ArcheAge-Classic-Linux-Launcher-x86_64.AppImage"
+# Update information for AppImageUpdate and Gear Lever: the newest GitHub release's .zsync file.
+# appimagetool writes the .zsync next to the AppImage when zsyncmake is installed.
+name=ArcheAge-Classic-Linux-Launcher-x86_64.AppImage
+ARCH=x86_64 "$tool" --appimage-extract-and-run \
+  -u "gh-releases-zsync|Z-arium|AAC-ADDON_MANAGER|latest|$name.zsync" "$app" "dist/$name"
+[ -f "$name.zsync" ] && mv "$name.zsync" dist/
+(cd dist && sha256sum "$name" $( [ -f "$name.zsync" ] && echo "$name.zsync") > SHA256SUMS)
+echo "Built dist/$name"
+ls -l dist

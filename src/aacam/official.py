@@ -15,7 +15,7 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-from . import __version__, net, paths
+from . import __version__, host, net, paths
 from .config import state_dir, write_atomic
 
 # Linux AppImage, from https://aa-classic.com/news/launcher-update-220. The
@@ -129,10 +129,26 @@ def start(appimage: Path, fuse_ok: bool, extra_env: dict[str, str | None] | None
             if value is not None and key != "PATH":
                 out.write(f"# {key}={value}\n")
         out.flush()
-        return subprocess.Popen(
+        return host.popen(
             [str(appimage)], cwd=appimage.parent, env=environment(fuse_ok, extra=extra_env),
+            extra_env=_host_env(fuse_ok, extra_env),
             stdout=out, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, start_new_session=True,
         )
+
+
+def _host_env(fuse_ok: bool, extra_env: dict[str, str | None] | None) -> dict[str, str | None]:
+    """In Flatpak only our own variables are passed to the host; it has its own environment."""
+    env = dict(extra_env or {})
+    env.pop("PATH", None)  # a PATH built inside the sandbox points into /app
+    if not fuse_ok:
+        env["APPIMAGE_EXTRACT_AND_RUN"] = "1"
+    return env
+
+
+def start_command(command: str, extra_env: dict[str, str | None] | None = None) -> subprocess.Popen:
+    """Start a custom launch command (`aacam launch --set`) instead of the official launcher."""
+    return host.popen(["sh", "-c", command], env=environment(True, extra=extra_env),
+                      extra_env=_host_env(True, extra_env), start_new_session=True)
 
 
 def log_tail(lines: int = 200) -> str:

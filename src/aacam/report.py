@@ -4,10 +4,9 @@ from __future__ import annotations
 
 import os
 import platform
-import shutil
 import subprocess
 
-from . import __version__, github, logs, official, paths, syscheck
+from . import __version__, github, host, logs, official, paths, syscheck
 from .config import Settings
 from .core import Manager
 
@@ -15,10 +14,10 @@ MARK = {syscheck.OK: "ok  ", syscheck.WARN: "warn", syscheck.FAIL: "FAIL"}
 
 
 def _gpus() -> list[str]:
-    if not shutil.which("lspci"):
+    if not host.which("lspci"):
         return ["(lspci not installed)"]
     try:
-        out = subprocess.run(["lspci"], capture_output=True, text=True, timeout=10).stdout
+        out = host.run(["lspci"], timeout=10).stdout
     except (OSError, subprocess.SubprocessError):
         return ["(lspci failed)"]
     return [line.split(": ", 1)[-1] for line in out.splitlines() if " VGA " in line or "3D controller" in line]
