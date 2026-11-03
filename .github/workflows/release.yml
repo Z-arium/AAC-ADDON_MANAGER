@@ -10,6 +10,8 @@ on:
         required: false
 permissions:
   contents: write
+  id-token: write      # keyless Sigstore signature of SHA256SUMS
+  attestations: write  # build provenance for the AppImage
 jobs:
   appimage:
     # Oldest supported runner, so the AppImage runs on older glibc too.
@@ -19,7 +21,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - run: sudo apt-get update && sudo apt-get install -y libfuse2 libegl1 libxkbcommon0 xvfb
+      - run: sudo apt-get update && sudo apt-get install -y libfuse2 libegl1 libxkbcommon0 xvfb zsync
         # Qt's xcb plugin links these; installed here so PyInstaller bundles them into the AppImage.
       - run: >-
           sudo apt-get install -y libxkbcommon-x11-0 libxcb-xkb1 libxcb-icccm4 libxcb-shape0 libxcb-keysyms1
@@ -31,15 +33,21 @@ jobs:
           QT_QPA_PLATFORM: offscreen
       - run: packaging/build-appimage.sh
       - name: Start the AppImage
+        env:
+          GITHUB_TOKEN: ${{ github.token }}  # for the self-update check, so shared runners don't hit the limit
         run: |
           app=dist/ArcheAge-Classic-Linux-Launcher-x86_64.AppImage
           $app cli --version
           $app cli doctor
+          $app cli self-update --check
           xvfb-run -a $app --selftest
+          # The update information AppImageUpdate and Gear Lever read.
+          $app --appimage-updateinformation | grep -q 'gh-releases-zsync|Z-arium|AAC-ADDON_MANAGER|latest|'
+          cd dist && sha256sum -c SHA256SUMS
       - uses: actions/upload-artifact@v4
         with:
           name: ArcheAge-Classic-Linux-Launcher-x86_64.AppImage
-          path: dist/ArcheAge-Classic-Linux-Launcher-x86_64.AppImage
+          path: dist/
 
   distros:
     # Arch Linux comes first (Jacob's call, 2026-10-30): the Arch job must pass to release.
@@ -83,9 +91,76 @@ jobs:
           # HTTPS from the bundled OpenSSL, which once couldn't find Arch's CA certificates.
           ./ArcheAge-Classic-Linux-Launcher-x86_64.AppImage cli doctor --network --strict
 
+  aur:
+    # The AUR package (Arch first): built with makepkg from this AppImage, installed with pacman, started.
+    # Must pass to release.
+    needs: appimage
+    runs-on: ubuntu-latest
+    container: archlinux:latest
+    steps:
+      - run: pacman -Syu --noconfirm --needed base-devel git ca-certificates libglvnd mesa fontconfig libxkbcommon dbus hicolor-icon-theme
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: ArcheAge-Classic-Linux-Launcher-x86_64.AppImage
+          path: dist
+      - name: Build the package
+        env:
+          TAG: ${{ inputs.tag || github.ref_name }}
+        run: |
+          case "$TAG" in
+            v[0-9]*) version=${TAG#v} ;;
+            *) version=$(sed -n 's/^version = "\(.*\)"/\1/p' pyproject.toml) ;;
+          esac
+          useradd -m builder
+          install -d -o builder aur
+          packaging/aur/make-pkgbuild.sh "$version" dist/ArcheAge-Classic-Linux-Launcher-x86_64.AppImage aur
+          # makepkg uses this file instead of downloading it, after checking it against sha256sums.
+          install -o builder dist/ArcheAge-Classic-Linux-Launcher-x86_64.AppImage \
+            "aur/archeage-classic-linux-launcher-bin-$version.AppImage"
+          chown -R builder aur
+          cd aur
+          su builder -c "makepkg -f --noconfirm && makepkg --printsrcinfo > .SRCINFO"
+          pacman -U --noconfirm ./*.pkg.tar.zst
+      - name: Start the installed package
+        env:
+          QT_QPA_PLATFORM: offscreen
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          aacam --version
+          aacam doctor --network --strict
+          aacam self-update --check
+          aac-linux-launcher --selftest
+          test -f /usr/share/applications/aac-linux-launcher.desktop
+          test -f /usr/share/icons/hicolor/256x256/apps/aac-linux-launcher.png
+      - uses: actions/upload-artifact@v4
+        with:
+          name: aur
+          path: |
+            aur/PKGBUILD
+            aur/.SRCINFO
+          include-hidden-files: true
+
+  flatpak:
+    # Flatpak bundle, built against the KDE runtime with the PySide base app. Informational, like the
+    # non-Arch distros: a failure here doesn't block a release.
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    container:
+      image: ghcr.io/flathub-infra/flatpak-github-actions:kde-6.8
+      options: --privileged
+    steps:
+      - uses: actions/checkout@v4
+      - uses: flathub-infra/flatpak-github-actions/flatpak-builder@master
+        with:
+          bundle: ArcheAge-Classic-Linux-Launcher.flatpak
+          manifest-path: packaging/flatpak/io.github.z_arium.ArcheAgeClassicLauncher.yml
+          cache-key: flatpak-builder-${{ github.sha }}
+
   release:
-    # Publish only after the AppImage started on Arch (other distros are informational).
-    needs: [appimage, distros]
+    # Publish only after the AppImage started on Arch and the AUR package installed there
+    # (other distros and the Flatpak are informational).
+    needs: [appimage, distros, aur, flatpak]
     if: startsWith(github.ref, 'refs/tags/') || (github.event_name == 'workflow_dispatch' && inputs.tag != '')
     runs-on: ubuntu-latest
     steps:
@@ -93,14 +168,56 @@ jobs:
         with:
           name: ArcheAge-Classic-Linux-Launcher-x86_64.AppImage
           path: dist
+      - uses: actions/download-artifact@v4
+        with:
+          name: aur
+          path: dist
+      - uses: actions/download-artifact@v4
+        continue-on-error: true  # the Flatpak is optional
+        with:
+          pattern: "*.flatpak*"
+          merge-multiple: true
+          path: dist
+      - name: Checksums
+        run: |
+          cd dist
+          ls -la
+          rm -f SHA256SUMS
+          sha256sum -- *.AppImage *.zsync PKGBUILD $(ls *.flatpak 2>/dev/null) > SHA256SUMS
+          cat SHA256SUMS
+      - uses: sigstore/cosign-installer@v3
+      - name: Sign the checksums (keyless, with this workflow's GitHub identity)
+        run: cosign sign-blob --yes --bundle dist/SHA256SUMS.sigstore.json dist/SHA256SUMS
+      - uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: dist/ArcheAge-Classic-Linux-Launcher-x86_64.AppImage
       - env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ inputs.tag || github.ref_name }}
         run: |
+          files=$(ls dist/*.AppImage dist/*.zsync dist/*.flatpak dist/PKGBUILD dist/SHA256SUMS dist/SHA256SUMS.sigstore.json 2>/dev/null)
           # The release may already exist if it was drafted on GitHub first.
           if gh release view -R "$GITHUB_REPOSITORY" "$TAG" >/dev/null 2>&1; then
-            gh release upload -R "$GITHUB_REPOSITORY" "$TAG" dist/ArcheAge-Classic-Linux-Launcher-x86_64.AppImage --clobber
+            gh release upload -R "$GITHUB_REPOSITORY" "$TAG" $files --clobber
           else
-            gh release create -R "$GITHUB_REPOSITORY" "$TAG" dist/ArcheAge-Classic-Linux-Launcher-x86_64.AppImage \
+            gh release create -R "$GITHUB_REPOSITORY" "$TAG" $files \
               --target "$GITHUB_SHA" --title "ArcheAge Classic Linux Launcher $TAG" --generate-notes
           fi
+      - name: Publish to the AUR (when the AUR_SSH_KEY secret is set)
+        env:
+          AUR_SSH_KEY: ${{ secrets.AUR_SSH_KEY }}
+          TAG: ${{ inputs.tag || github.ref_name }}
+        if: env.AUR_SSH_KEY != ''
+        run: |
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "$AUR_SSH_KEY" > ~/.ssh/aur && chmod 600 ~/.ssh/aur
+          ssh-keyscan -t ed25519 aur.archlinux.org >> ~/.ssh/known_hosts
+          export GIT_SSH_COMMAND="ssh -i ~/.ssh/aur -o IdentitiesOnly=yes"
+          git clone ssh://aur@aur.archlinux.org/archeage-classic-linux-launcher-bin.git aur-repo
+          cp dist/PKGBUILD dist/.SRCINFO aur-repo/
+          cd aur-repo
+          git config user.name "Z-arium"
+          git config user.email "227860715+Z-arium@users.noreply.github.com"
+          git add PKGBUILD .SRCINFO
+          git diff --cached --quiet || git commit -m "Update to $TAG"
+          git push origin HEAD:master

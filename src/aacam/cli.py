@@ -5,13 +5,12 @@ from __future__ import annotations
 import argparse
 import logging
 import os
-import subprocess
 import sys
 import textwrap
 import time
 from pathlib import Path
 
-from . import __version__, backup, crash, github, installer, logs, net, official, paths, report, syscheck, wine
+from . import __version__, backup, crash, github, installer, logs, net, official, paths, report, selfupdate, syscheck, wine
 from .config import Settings
 from .core import Manager, NotFound
 from .registry import Registry
@@ -337,7 +336,7 @@ def cmd_launch(args, settings):
             print(f"Skipped updating addons: {e}")
     extra = crash.launch_env(settings)
     if command:
-        subprocess.Popen(["sh", "-c", command], start_new_session=True, env=official.environment(True, extra=extra))
+        official.start_command(command, extra)
         print(f"Started: {command}")
         return
     fuse_ok = syscheck.has_lib("libfuse.so.2", 64)
@@ -367,6 +366,27 @@ def cmd_launcher(args, settings):
     if path is None:
         raise CliError("official launcher not found; run `aacam launcher --download`")
     print(path)
+
+
+def cmd_self_update(args, settings):
+    how = selfupdate.kind()
+    print(f"ArcheAge Classic Linux Launcher {__version__} ({how})")
+    update = selfupdate.check()
+    if update is None:
+        print("This is the newest version.")
+        return
+    print(f"Version {update.version} is out: {update.page}")
+    if update.notes:
+        print(textwrap.indent(update.notes, "  "))
+    if args.check:
+        return
+    if how != "appimage":
+        print(selfupdate.how_to_update(how))
+        return
+    print(f"Downloading {selfupdate.ASSET} and checking it against {selfupdate.SUMS}…")
+    path = selfupdate.install(update)
+    print(f"Updated {path} to {update.version}; the previous one is kept as {path.name}.old. "
+          "Restart the launcher to use it.")
 
 
 def cmd_doctor(args, settings):
@@ -537,6 +557,8 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--set", metavar="APPIMAGE", help="use this launcher AppImage")
     sp.add_argument("--download", action="store_true", help="download it from aa-classic.com")
     sp.add_argument("--version", default=official.DEFAULT_VERSION, help="launcher version to download")
+    sp = add("self-update", cmd_self_update, "update this launcher to its newest release")
+    sp.add_argument("--check", action="store_true", help="only say whether there is a newer version")
     sp = add("report", cmd_report, "print a report of your setup and recent log to share when asking for help")
     sp.add_argument("--log", type=int, default=80, metavar="N", help="lines of the launcher's log to include (default 80)")
     sp = add("changes", cmd_changes, "show release notes: what's new since the installed version")
@@ -586,7 +608,8 @@ def main(argv: list[str] | None = None) -> int:
     log = logging.getLogger("aacam.cli")
     try:
         args.fn(args, Settings())
-    except (CliError, installer.InstallError, github.GitHubError, official.LauncherError, wine.WineError) as e:
+    except (CliError, installer.InstallError, github.GitHubError, official.LauncherError, wine.WineError,
+            selfupdate.UpdateError) as e:
         log.error("%s: %s", args.command, e)
         print(f"error: {e}", file=sys.stderr)
         return 1

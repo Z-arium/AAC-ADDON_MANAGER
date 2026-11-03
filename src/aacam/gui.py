@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 import logging
-import shutil
-import subprocess
 import sys
 import time
 import traceback
@@ -45,7 +43,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from . import __version__, backup, crash, github, installer, logs, official, paths, report, syscheck, theme, wine
+from . import __version__, backup, crash, github, host, installer, logs, official, paths, report, selfupdate, syscheck, theme, wine
 from .config import Settings
 from .core import Manager
 from .registry import Addon, Registry
@@ -54,15 +52,6 @@ APP_NAME = "ArcheAge Classic Linux Launcher"
 APP_REPO = "Z-arium/AAC-ADDON_MANAGER"
 
 log = logging.getLogger("aacam.gui")
-
-
-def _newer(tag: str, current: str) -> bool:
-    def parts(v: str) -> tuple[int, ...]:
-        return tuple(int(x) for x in v.lstrip("v").split(".") if x.isdigit())
-    try:
-        return parts(tag) > parts(current)
-    except ValueError:
-        return False
 
 
 # --- background work ----------------------------------------------------------
@@ -83,7 +72,8 @@ class Job(QRunnable):
     def run(self) -> None:
         try:
             result = self.fn()
-        except (github.GitHubError, installer.InstallError, official.LauncherError, wine.WineError, OSError) as e:
+        except (github.GitHubError, installer.InstallError, official.LauncherError, wine.WineError,
+                selfupdate.UpdateError, OSError) as e:
             log.error("%s", e)
             self.signals.failed.emit(str(e))
         except Exception:  # keep the window alive and show what went wrong
@@ -321,6 +311,23 @@ class SetupPanel(QWidget):
         form.addWidget(_label("Addon settings and addons.txt are backed up before every update "
                               "(My Addons > Backups…), and each addon can be rolled back from its details.", muted=True))
         lay.addWidget(box)
+
+        box = QGroupBox("6. This launcher")
+        form = QVBoxLayout(box)
+        self.self_label = _label(rich=True)
+        form.addWidget(self.self_label)
+        check = QCheckBox("Look for a new version of the launcher when it starts")
+        check.setChecked(bool(self.win.settings.get("check_launcher_updates", True)))
+        check.toggled.connect(lambda on: self.win.settings.set("check_launcher_updates", on))
+        form.addWidget(check)
+        row = QHBoxLayout()
+        row.addWidget(_button("Check now", lambda: self.win.check_app_update(quiet=False)))
+        self.self_update_btn = _button("Update", lambda: self.win.update_launcher())
+        self.self_update_btn.hide()
+        row.addWidget(self.self_update_btn)
+        row.addStretch()
+        form.addLayout(row)
+        lay.addWidget(box)
         self.refresh()
 
     def refresh(self) -> None:
@@ -359,11 +366,29 @@ class SetupPanel(QWidget):
             "A token from the GITHUB_TOKEN variable is in use." if github.token() and not saved else
             "A token is saved." if saved else "No token: 60 lookups an hour.")
         self.clear_token_btn.setEnabled(saved)
+        self.show_self_update()
         mgr = self.win.mgr
         self.folder_label.setText(
             str(mgr.install.addon_dir) if mgr else
             f"{_word('negative', 'Not found yet')}. It appears after the game's first start, or choose it now."
         )
+
+    def show_self_update(self) -> None:
+        how = selfupdate.kind()
+        where = {"appimage": "AppImage", "aur": "AUR package", "flatpak": "Flatpak",
+                 "python": "install.sh"}[how]
+        text = f"Version {__version__}, installed as the {where}."
+        update = self.win.app_update
+        if update:
+            text += (f" {_word('negative', f'Version {update.version} is out')}"
+                     f' (<a href="{update.page}">what\'s new</a>). {selfupdate.how_to_update(how)}')
+        else:
+            text += " Updates come from GitHub releases, checked against signed checksums."
+        self.self_label.setText(text)
+        self.self_label.setOpenExternalLinks(True)
+        self.self_update_btn.setVisible(bool(update) and how == "appimage")
+        if update:
+            self.self_update_btn.setText(f"Update to {update.version}")
 
     def download(self) -> None:
         self.download_btn.setEnabled(False)
@@ -828,6 +853,8 @@ class MainWindow(QMainWindow):
         self.watch: official.GameWatch | None = None
         self.memory_warned = False
         self.game_state: tuple[str, str] | None = None
+        self.app_update: selfupdate.Update | None = None
+        self.app_update_link: QPushButton | None = None
         self.watch_timer = QTimer(self)
         self.watch_timer.setInterval(2000)
         self.watch_timer.timeout.connect(self.poll_game)
@@ -871,7 +898,8 @@ class MainWindow(QMainWindow):
 
         self.refresh_installed()
         QTimer.singleShot(0, self.load_registry)
-        QTimer.singleShot(0, self.check_app_update)
+        if self.settings.get("check_launcher_updates", True):
+            QTimer.singleShot(0, self.check_app_update)
         QTimer.singleShot(0, self.check_system)
         if not self.settings.get("setup_done"):
             QTimer.singleShot(0, self.show_setup)
@@ -1218,27 +1246,76 @@ class MainWindow(QMainWindow):
 
         self.run("Loading addon catalogue…", lambda: Registry.load(refresh=refresh), loaded)
 
-    def check_app_update(self) -> None:
-        """Quietly look for a newer release of this app and show a link if there is one."""
-        def fetch() -> dict | None:
+    def check_app_update(self, quiet: bool = True) -> None:
+        """Look for a newer release of this launcher; offer it in the status bar and in Setup."""
+        def fetch() -> selfupdate.Update | None | str:
             try:
-                data = github.get_json(f"{github.API}/repos/{APP_REPO}/releases/latest")
-            except github.GitHubError:
-                return None
-            return data if isinstance(data, dict) else None
+                return selfupdate.check()
+            except (github.GitHubError, selfupdate.UpdateError) as e:
+                log.info("launcher update check failed: %s", e)
+                return str(e)
 
-        def show(data: dict | None) -> None:
-            if not data or not _newer(data.get("tag_name", ""), __version__):
+        def show(result: selfupdate.Update | None | str) -> None:
+            if isinstance(result, str):
+                if not quiet:
+                    QMessageBox.warning(self, APP_NAME, f"Could not check for a new version: {result}")
                 return
-            link = QLabel(f'<a href="{data["html_url"]}">Version {data["tag_name"]} is available</a>')
-            link.setOpenExternalLinks(True)
-            self.statusBar().addPermanentWidget(link)
+            self.app_update = result
+            self.setup_panel.show_self_update()
+            if result is None:
+                if not quiet:
+                    self.statusBar().showMessage(f"Version {__version__} is the newest.", 8000)
+                return
+            if self.app_update_link is None:
+                self.app_update_link = QPushButton()
+                self.app_update_link.setFlat(True)
+                self.app_update_link.setCursor(Qt.PointingHandCursor)
+                self.app_update_link.clicked.connect(self.update_launcher)
+                self.statusBar().addPermanentWidget(self.app_update_link)
+            self.app_update_link.setText(f"Version {result.version} is out: update the launcher")
 
         job = Job(fetch)
         self.jobs.add(job)
         job.signals.done.connect(show)
         job.signals.done.connect(lambda _: self.jobs.discard(job))
         self.pool.start(job)
+
+    def update_launcher(self) -> None:
+        update = self.app_update
+        if update is None:
+            return
+        how = selfupdate.kind()
+        if how != "appimage":
+            box = QMessageBox(QMessageBox.Information, APP_NAME,
+                              f"Version {update.version} is out. {selfupdate.how_to_update(how)}", parent=self)
+            box.setInformativeText(f'<a href="{update.page}">What\'s new</a>')
+            box.exec()
+            return
+        notes = update.notes or "No release notes."
+        box = QMessageBox(QMessageBox.Question, APP_NAME,
+                          f"Update the launcher from {__version__} to {update.version}?", parent=self)
+        box.setInformativeText("The new AppImage is downloaded from GitHub and checked against the release's "
+                               "checksums before it replaces this one. Your addons and settings stay.")
+        box.setDetailedText(notes)
+        box.setStandardButtons(QMessageBox.Yes | QMessageBox.No)
+        if box.exec() != QMessageBox.Yes:
+            return
+
+        def done(path: Path) -> None:
+            self.app_update = None
+            if self.app_update_link is not None:
+                self.app_update_link.hide()
+            self.setup_panel.show_self_update()
+            if self.watch is not None:
+                QMessageBox.information(self, APP_NAME, f"Updated to {update.version}. It starts the next time "
+                                        "you open the launcher.")
+                return
+            again = QMessageBox.question(self, APP_NAME, f"Updated to {update.version}. Restart the launcher now?")
+            if again == QMessageBox.Yes:
+                selfupdate.restart(path)
+                QApplication.quit()
+
+        self.run(f"Downloading version {update.version}…", lambda: selfupdate.install(update), done)
 
     def check_system(self) -> None:
         """Run the driver checks off the UI thread for the Play tab."""
@@ -1646,8 +1723,7 @@ class MainWindow(QMainWindow):
             extra = crash.launch_env(self.settings)
             try:
                 if command:
-                    proc = subprocess.Popen(["sh", "-c", command], start_new_session=True,
-                                            env=official.environment(True, extra=extra))
+                    proc = official.start_command(command, extra)
                 else:
                     proc = official.start(appimage, syscheck.has_lib("libfuse.so.2", 64), extra)
             except (official.LauncherError, OSError) as e:
@@ -1747,10 +1823,10 @@ class MainWindow(QMainWindow):
 
 def notify(title: str, text: str) -> None:
     """A desktop notification, which shows over the game's window."""
-    if shutil.which("notify-send"):
+    if host.which("notify-send"):
         try:
-            subprocess.Popen(["notify-send", "-a", APP_NAME, "-u", "critical", title, text],
-                             env=official.environment(True), start_new_session=True)
+            host.popen(["notify-send", "-a", APP_NAME, "-u", "critical", title, text],
+                       env=official.environment(True), start_new_session=True)
         except OSError:
             pass
 

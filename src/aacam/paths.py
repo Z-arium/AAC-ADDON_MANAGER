@@ -7,6 +7,8 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
+from . import host
+
 # Folder names the game installer uses on drive C: AAClassic, AAClassic2, ...
 INSTALL_RE = re.compile(r"^AAClassic\d*$", re.IGNORECASE)
 
@@ -139,7 +141,7 @@ def resolve_user_path(path: Path) -> Install:
 def game_pids() -> list[int]:
     """ArcheAge processes running under Wine, the game itself (argv[0] is archeage.exe) first."""
     found: list[tuple[bool, int]] = []
-    for pid in Path("/proc").iterdir():
+    for pid in host.proc(refresh=True).iterdir():
         if not pid.name.isdigit():
             continue
         try:

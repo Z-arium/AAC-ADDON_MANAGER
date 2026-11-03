@@ -8,12 +8,30 @@ A free app that gets ArcheAge Classic running on Linux and keeps your addons up 
 
 ![The launcher's Play screen](docs/screenshot.png)
 
-Download `ArcheAge-Classic-Linux-Launcher-x86_64.AppImage` from the [Releases page](https://github.com/Z-arium/AAC-ADDON_MANAGER/releases), then:
+### Get it
+
+**AppImage** (any distro): download `ArcheAge-Classic-Linux-Launcher-x86_64.AppImage` from the [Releases page](https://github.com/Z-arium/AAC-ADDON_MANAGER/releases), then:
 
 ```bash
 chmod +x ArcheAge-Classic-Linux-Launcher-x86_64.AppImage
 ./ArcheAge-Classic-Linux-Launcher-x86_64.AppImage
 ```
+
+It updates itself: when a new version is out the status bar says so, and **Update** (or Setup > This launcher, or `aacam self-update`) downloads it, checks it against the release's checksums and replaces the AppImage, keeping the old one as `.old`. The AppImage also carries update information for AppImageUpdate and Gear Lever.
+
+**Arch Linux, CachyOS and other Arch-based distros**: the AUR package `archeage-classic-linux-launcher-bin` (`yay -S archeage-classic-linux-launcher-bin` or `paru -S …`) installs the launcher to `/opt`, `aac-linux-launcher` and `aacam` to `/usr/bin`, and a menu entry; your AUR helper updates it. Until it is on the AUR, every release attaches its `PKGBUILD`: download it into an empty folder and run `makepkg -si`.
+
+**Flatpak**: every release attaches `ArcheAge-Classic-Linux-Launcher.flatpak` (`flatpak install --user ArcheAge-Classic-Linux-Launcher.flatpak`; needs the KDE 6.8 runtime from Flathub). Inside the sandbox it starts the official launcher and Wine on your system with `flatpak-spawn --host`, and reads the game's process from the host, so Play, crash help and the memory meter work as in the AppImage. The command line is `flatpak run io.github.z_arium.ArcheAgeClassicLauncher cli …`. Its settings live in `~/.var/app/io.github.z_arium.ArcheAgeClassicLauncher`, apart from the AppImage's.
+
+**Checking a download**: each release has `SHA256SUMS` (`sha256sum -c SHA256SUMS --ignore-missing`), signed by the release workflow with Sigstore. To check the signature with [cosign](https://github.com/sigstore/cosign):
+
+```bash
+cosign verify-blob SHA256SUMS --bundle SHA256SUMS.sigstore.json \
+  --certificate-identity-regexp '^https://github.com/Z-arium/AAC-ADDON_MANAGER/\.github/workflows/release\.yml@' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com
+```
+
+The AppImage also has a GitHub build attestation: `gh attestation verify ArcheAge-Classic-Linux-Launcher-x86_64.AppImage -R Z-arium/AAC-ADDON_MANAGER`. The self-updater checks the checksum every time, and the signature too when cosign is installed.
 
 The first time it opens, **Setup** walks you through three things:
 
@@ -31,7 +49,7 @@ The window looks like a window from ArcheAge itself: parchment pages under bronz
 - **Backups…**: every addon's settings and `addons.txt` in one zip. One is made automatically before each update; restore any of them, and what you had is saved first. Addons you installed by hand or with another manager that are in the catalogue get a **Track** button, so they update like the rest without losing their settings.
 - **Get Addons**: the public catalogue, with search and tag filters, each addon's last release date and downloads (**Get release dates** looks them up), sorting by name, date or downloads, and details on double-click. Install pulls in any addons it depends on.
 - **Update all** checks every addon you installed on startup and updates them in one click, after showing what's new. Setup has options to update automatically when the launcher starts and when you press Play.
-- The app tells you in the status bar when a newer version of itself is out.
+- The app tells you in the status bar when a newer version of itself is out, and the AppImage updates itself in one click (see Get it).
 - **When something goes wrong** the message says what to do: GitHub's hourly limit (with the time it resets and a button to add a token), no internet, a broken or wrong zip, a renamed addon repo. An addon whose repo is gone doesn't stop the others from updating.
 - **GitHub token** (Setup, optional): raises GitHub's limit from 60 lookups an hour to 5,000 for players with many addons. Update checks are cached and revalidated with ETags, so checking again costs almost nothing.
 - **Copy diagnostics** (Setup) copies your system details, the launcher's own log (`~/.local/state/aacam/aacam.log`, tokens hidden) and the official launcher's log for a bug report; **Report a bug** opens the issue form.
@@ -106,4 +124,6 @@ The GUI tests run when PySide6 is installed and are skipped otherwise. CI runs e
 
 ## Releasing
 
-Push a tag like `v0.2.0` (bump `version` in `pyproject.toml` and `src/aacam/__init__.py` first). The release workflow runs the tests, builds the AppImage with PyInstaller and appimagetool, and attaches it to a GitHub release. Pull requests build the AppImage too and keep it as a workflow artifact.
+Push a tag like `v0.2.0` (bump `version` in `pyproject.toml`, `src/aacam/__init__.py` and the release list in `packaging/flatpak/*.metainfo.xml` first), or run the release workflow with a `tag`. It runs the tests, builds the AppImage with PyInstaller and appimagetool (with its `.zsync`), starts it on seven distros, builds and installs the AUR package on Arch, builds the Flatpak, then attaches the AppImage, `.zsync`, Flatpak, `PKGBUILD`, `SHA256SUMS` and its Sigstore signature to the GitHub release. Arch must pass; the other distros and the Flatpak don't block a release. Pull requests build everything too and keep it as workflow artifacts.
+
+The AUR package is pushed to the AUR by the release workflow once the repository has an `AUR_SSH_KEY` secret: the private half of an SSH key whose public half is on the AUR account that owns `archeage-classic-linux-launcher-bin`. Flathub needs a one-time submission: a pull request to [flathub/flathub](https://github.com/flathub/flathub) with `packaging/flatpak/io.github.z_arium.ArcheAgeClassicLauncher.yml`, its source switched to this repository's release tag.

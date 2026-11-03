@@ -1,0 +1,53 @@
+# Flatpak of the ArcheAge Classic Linux Launcher, built from this repository.
+# Build: flatpak-builder --user --install --force-clean build packaging/flatpak/io.github.z_arium.ArcheAgeClassicLauncher.yml
+id: io.github.z_arium.ArcheAgeClassicLauncher
+runtime: org.kde.Platform
+runtime-version: '6.8'
+sdk: org.kde.Sdk
+base: io.qt.PySide.BaseApp
+base-version: '6.8'
+command: aac-linux-launcher
+finish-args:
+  - --share=ipc
+  - --share=network
+  - --socket=wayland
+  - --socket=fallback-x11
+  - --device=dri
+  # Wine and Proton prefixes, the official launcher and ~/Documents/AAClassic/Addon all live in home.
+  - --filesystem=home
+  # The host's libraries, read by the system check (FUSE 2, Vulkan, 32-bit drivers) under /run/host.
+  - --filesystem=host-os:ro
+  - --filesystem=host-etc:ro
+  # The official launcher, Wine and the game run on the host (flatpak-spawn --host), not in the sandbox.
+  - --talk-name=org.freedesktop.Flatpak
+  - --talk-name=org.freedesktop.Notifications
+cleanup-commands:
+  - /app/cleanup-BaseApp.sh
+modules:
+  - name: pyyaml
+    buildsystem: simple
+    build-commands:
+      - pip3 install --no-index --no-deps --prefix=${FLATPAK_DEST} PyYAML-*.whl
+    sources:
+      - type: file
+        url: https://files.pythonhosted.org/packages/b9/2b/614b4752f2e127db5cc206abc23a8c19678e92b23c3db30fc86ab731d3bd/PyYAML-6.0.2-cp312-cp312-manylinux_2_17_x86_64.manylinux2014_x86_64.whl
+        sha256: 80bab7bfc629882493af4aa31a4cfa43a4c57c83813253626916b8c7ada83476
+
+  - name: aac-linux-launcher
+    buildsystem: simple
+    build-commands:
+      - pip3 install --no-index --no-deps --no-build-isolation --prefix=${FLATPAK_DEST} .
+      - install -Dm755 packaging/flatpak/aac-linux-launcher.sh ${FLATPAK_DEST}/bin/aac-linux-launcher
+      - sed -e "s|^Exec=.*|Exec=aac-linux-launcher|" -e "s|^Icon=.*|Icon=${FLATPAK_ID}|"
+        packaging/aac-linux-launcher.desktop > ${FLATPAK_ID}.desktop
+      - install -Dm644 ${FLATPAK_ID}.desktop ${FLATPAK_DEST}/share/applications/${FLATPAK_ID}.desktop
+      - for png in src/aacam/icons/*.png; do s=$(basename $png .png); install -Dm644 $png
+        ${FLATPAK_DEST}/share/icons/hicolor/${s}x${s}/apps/${FLATPAK_ID}.png; done
+      - install -Dm644 packaging/flatpak/${FLATPAK_ID}.metainfo.xml ${FLATPAK_DEST}/share/metainfo/${FLATPAK_ID}.metainfo.xml
+    sources:
+      - type: dir
+        path: ../..
+        skip:
+          - build
+          - dist
+          - .flatpak-builder
